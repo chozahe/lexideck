@@ -68,6 +68,13 @@ function parseCompletion(content, sourceText) {
     if (typeof word.text !== "string" || typeof word.meaning !== "string") {
       throw new Error("Ответ API содержит слово без текста или значения.");
     }
+    if (typeof word.lemma !== "string" || !word.lemma.trim()) {
+      throw new Error("Ответ API не содержит основную форму слова.");
+    }
+    if (!Array.isArray(word.examples) || word.examples.length < 2 || word.examples.length > 3 || word.examples.some((example) => typeof example !== "string" || !example.trim())) {
+      throw new Error("Ответ API должен содержать 2–3 примера модели для каждого значения.");
+    }
+    word.examples = word.examples.map((example) => example.trim());
     if (!Number.isInteger(word.start) || !Number.isInteger(word.end) || word.start < 0 || word.end <= word.start) {
       throw new Error("Ответ API не содержит корректные позиции слов в исходном тексте.");
     }
@@ -92,8 +99,8 @@ async function translate(text) {
     {
       role: "system",
       content: "Переведи текст с " + config.sourceLanguage + " на " + config.targetLanguage +
-        '. Верни только JSON-объект: {"sentence_translation":"перевод всего текста","words":[{"text":"точный фрагмент исходного текста","meaning":"значение в данном контексте","start":0,"end":4}]}. ' +
-        "Добавь разбор всех содержательных слов в порядке текста. start и end — нулевая позиция и исключительная конечная позиция фрагмента в символах Unicode исходного текста; " +
+        '. Верни только JSON-объект: {"sentence_translation":"перевод всего текста","words":[{"text":"точный фрагмент исходного текста","lemma":"основная форма","meaning":"значение в данном контексте","examples":["пример модели 1","пример модели 2"],"start":0,"end":4}]}. ' +
+        "Добавь разбор всех содержательных слов в порядке текста. Для каждого значения дай ровно 2 коротких дополнительных примера модели на " + config.sourceLanguage + ", не используя исходную фразу. lemma должна содержать основную форму слова. start и end — нулевая позиция и исключительная конечная позиция фрагмента в символах Unicode исходного текста; " +
         "указывай точные границы каждого вхождения, включая повторяющиеся слова."
     },
     { role: "user", content: text }
@@ -153,12 +160,165 @@ async function consumePendingComic({ pendingComicImage, pendingComicError }) {
   }
 }
 
+function normalizeTerm(value) {
+  return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+}
+
+function appendUnique(target, values) {
+  const seen = new Set(target.map(normalizeTerm));
+  for (const value of values) {
+    const clean = value.trim();
+    if (clean && !seen.has(normalizeTerm(clean))) {
+      target.push(clean);
+      seen.add(normalizeTerm(clean));
+    }
+  }
+}
+
+async function saveWord(word) {
+  const { cards = [] } = await chrome.storage.local.get("cards");
+  const headword = word.lemma.trim();
+  let card = cards.find((item) => item.kind === "word" && normalizeTerm(item.headword) === normalizeTerm(headword));
+  if (!card) {
+    card = { id: `${Date.now()}-${Math.random()}`, kind: "word", headword, meanings: [] };
+    cards.push(card);
+  }
+  let meaning = card.meanings.find((item) => normalizeTerm(item.text) === normalizeTerm(word.meaning));
+  if (!meaning) {
+    meaning = { text: word.meaning.trim(), contexts: [], examples: [] };
+    card.meanings.push(meaning);
+  }
+  const context = { form: word.text, text: $("source-text").value.trim(), start: word.start, end: word.end };
+  if (!meaning.contexts.some((item) => item.form === context.form && item.text === context.text && item.start === context.start && item.end === context.end)) {
+    meaning.contexts.push(context);
+  }
+  appendUnique(meaning.examples, word.examples);
+  await chrome.storage.local.set({ cards });
+  await renderCards();
+}
+
+let selectedExpression;
+
+function updateSelectedExpression() {
+  const source = $("source-text");
+  const start = source.selectionStart;
+  const end = source.selectionEnd;
+  selectedExpression = end > start ? { text: source.value.slice(start, end).trim(), start, end } : undefined;
+  $("save-expression").disabled = !selectedExpression?.text;
+}
+
+async function requestExpressionExamples(expression, meaning, context) {
+  const config = await currentSettings();
+  const content = await apiCompletion([
+    { role: "system", content: `Сгенерируй два дополнительных примера на ${config.sourceLanguage} для устойчивого выражения «${expression}» со значением «${meaning}». Не копируй исходный контекст. Верни только JSON: {"examples":["пример 1","пример 2"]}.` },
+    { role: "user", content: context }
+  ], config);
+  const examples = JSON.parse(content).examples;
+  if (!Array.isArray(examples) || examples.length < 2 || examples.length > 3 || examples.some((item) => typeof item !== "string" || !item.trim())) {
+    throw new Error("Модель должна вернуть 2–3 примера.");
+  }
+  return examples.map((item) => item.trim());
+}
+
+async function saveExpression(event) {
+  event.preventDefault();
+  if (!selectedExpression?.text) return;
+  const expression = selectedExpression;
+  const meaningText = $("expression-meaning").value.trim();
+  if (!meaningText) return $("expression-meaning").focus();
+  const sourceContext = $("source-text").value.trim();
+  const submit = $("expression-form").querySelector('[type="submit"]');
+  submit.disabled = true;
+  submit.textContent = "Получаем примеры…";
+  showError("");
+  try {
+    const examples = await requestExpressionExamples(expression.text, meaningText, sourceContext);
+    const { cards = [] } = await chrome.storage.local.get("cards");
+    let card = cards.find((item) => item.kind === "expression" && normalizeTerm(item.headword) === normalizeTerm(expression.text));
+    if (!card) {
+      card = { id: `${Date.now()}-${Math.random()}`, kind: "expression", headword: expression.text, meanings: [] };
+      cards.push(card);
+    }
+    let meaning = card.meanings.find((item) => normalizeTerm(item.text) === normalizeTerm(meaningText));
+    if (!meaning) {
+      meaning = { text: meaningText, contexts: [], examples: [] };
+      card.meanings.push(meaning);
+    }
+    if (!meaning.contexts.some((item) => item.text === sourceContext && item.start === expression.start && item.end === expression.end)) {
+      meaning.contexts.push({ form: expression.text, text: sourceContext, start: expression.start, end: expression.end });
+    }
+    appendUnique(meaning.examples, examples);
+    await chrome.storage.local.set({ cards });
+    await renderCards();
+    $("expression-form").hidden = true;
+    $("expression-meaning").value = "";
+    $("save-expression").textContent = "Выражение сохранено";
+  } catch (error) {
+    showError(`Не удалось сохранить выражение: ${error.message}`);
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Сохранить выражение";
+  }
+}
+
+async function renderCards() {
+  const { cards = [] } = await chrome.storage.local.get("cards");
+  $("vocabulary-cards").replaceChildren(...cards.map((card) => {
+    const article = document.createElement("article");
+    const heading = document.createElement("h3");
+    heading.textContent = card.headword;
+    article.append(heading);
+    for (const meaning of card.meanings) {
+      const meaningHeading = document.createElement("p");
+      meaningHeading.textContent = meaning.text;
+      article.append(meaningHeading);
+      const contexts = document.createElement("ul");
+      for (const context of meaning.contexts) {
+        const item = document.createElement("li");
+        item.className = "card-context";
+        item.textContent = `${context.form}: ${context.text}`;
+        contexts.append(item);
+      }
+      article.append(contexts);
+      if (meaning.examples.length) {
+        const examplesHeading = document.createElement("p");
+        examplesHeading.textContent = "Примеры модели";
+        article.append(examplesHeading);
+        const examples = document.createElement("ul");
+        for (const example of meaning.examples) {
+          const item = document.createElement("li");
+          item.textContent = example;
+          examples.append(item);
+        }
+        article.append(examples);
+      }
+    }
+    return article;
+  }));
+  $("vocabulary-empty").hidden = cards.length > 0;
+}
+
 function renderResult(result) {
   $("sentence-translation").textContent = result.sentence_translation;
   const list = $("word-meanings");
-  list.replaceChildren(...result.words.map(({ text, meaning }) => {
+  list.replaceChildren(...result.words.map((word) => {
     const item = document.createElement("li");
-    item.textContent = `${text} — ${meaning}`;
+    const label = document.createElement("span");
+    label.textContent = `${word.text} — ${word.meaning}`;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "Сохранить";
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        await saveWord(word);
+        save.textContent = "Сохранено";
+      } catch (error) {
+        showError(`Не удалось сохранить карточку: ${error.message}`);
+        save.disabled = false;
+      }
+    });
+    item.append(label, save);
     return item;
   }));
   $("result").hidden = false;
@@ -196,6 +356,18 @@ $("settings-toggle").addEventListener("click", () => {
   }
 });
 $("translate").addEventListener("click", () => void runTranslation());
+$("source-text").addEventListener("select", updateSelectedExpression);
+$("source-text").addEventListener("keyup", updateSelectedExpression);
+$("source-text").addEventListener("mouseup", updateSelectedExpression);
+$("source-text").addEventListener("input", updateSelectedExpression);
+$("save-expression").addEventListener("click", () => {
+  if (!selectedExpression) return;
+  $("expression-text").textContent = selectedExpression.text;
+  $("expression-form").hidden = false;
+  $("expression-meaning").focus();
+});
+$("cancel-expression").addEventListener("click", () => { $("expression-form").hidden = true; });
+$("expression-form").addEventListener("submit", (event) => void saveExpression(event));
 $("source-text").addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void runTranslation();
 });
@@ -214,6 +386,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 void loadSettings().then(async () => {
+  await renderCards();
   const { pendingSelection } = await chrome.storage.local.get("pendingSelection");
   if (pendingSelection) {
     $("source-text").value = pendingSelection;

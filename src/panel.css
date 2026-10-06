@@ -16,3 +16,9 @@ button:disabled { opacity: .6; cursor: wait; }
 #settings-status { color: #287a35; }
 #word-meanings { padding-left: 24px; }
 #word-meanings li { padding: 3px 0; }
+#word-meanings li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#word-meanings button { flex: none; padding: 4px 8px; }
+#vocabulary-cards article { border-top: 1px solid #8886; padding: 10px 0; }
+#vocabulary-cards h3 { margin: 0 0 6px; font-size: 1rem; }
+#vocabulary-cards ul { margin: 4px 0; padding-left: 20px; }
+.card-context { color: #777; }

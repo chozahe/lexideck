@@ -28,6 +28,14 @@
       <section>
         <label for="source-text">Текст для перевода</label>
         <textarea id="source-text" rows="5" placeholder="Выделите текст на странице или введите его здесь"></textarea>
+        <button id="save-expression" type="button" disabled>Сохранить выделенное выражение</button>
+        <form id="expression-form" hidden>
+          <p>Выражение: <strong id="expression-text"></strong></p>
+          <label for="expression-meaning">Значение</label>
+          <input id="expression-meaning" required>
+          <button type="submit">Сохранить выражение</button>
+          <button id="cancel-expression" class="subtle" type="button">Отмена</button>
+        </form>
         <p id="comic-status" role="status"></p>
         <button id="translate" type="button">Подтвердить текст и перевести</button>
         <p id="error" role="alert"></p>
@@ -38,6 +46,11 @@
         <p id="sentence-translation"></p>
         <h2>Слова по порядку</h2>
         <ol id="word-meanings"></ol>
+      </section>
+      <section id="vocabulary">
+        <h2>Словарь</h2>
+        <p id="vocabulary-empty">Пока нет сохранённых карточек.</p>
+        <div id="vocabulary-cards"></div>
       </section>
     </main>
   </body>

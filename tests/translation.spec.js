@@ -117,7 +117,7 @@ test("пользователь получает перевод и значени
   await page.getByRole("button", { name: "Перевести" }).click();
 
   await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
-  await expect(page.locator("#word-meanings li")).toHaveText([
+  await expect(page.locator("#word-meanings li > span")).toHaveText([
     "took off — сняла (одежду)",
     "coat — пальто, которое она сняла",
     "coat — пальто, которое она надела"
@@ -128,6 +128,57 @@ test("пользователь получает перевод и значени
   expect(call.body.messages[0].content).toContain('"start":0,"end":4');
   expect(call.body.messages[0].content).toContain("включая повторяющиеся слова");
   expect(call.body.messages[1].content).toBe("She took off her coat and wore her coat.");
+});
+
+test("пользователь сохраняет значения слова в одну локальную карточку и открывает её после перезапуска панели", async ({ page }) => {
+  await page.goto("/src/panel.html");
+  await configureApi(page);
+  await page.getByRole("button", { name: "Перевести" }).click();
+
+  const coatRows = page.locator("#word-meanings li").filter({ hasText: "coat —" });
+  await coatRows.nth(0).getByRole("button", { name: "Сохранить" }).click();
+  await coatRows.nth(1).getByRole("button", { name: "Сохранить" }).click();
+
+  await expect(page.locator("#vocabulary-cards article")).toHaveCount(1);
+  await expect(page.locator("#vocabulary-cards")).toContainText("coat");
+  await expect(page.locator("#vocabulary-cards")).toContainText("пальто, которое она сняла");
+  await expect(page.locator("#vocabulary-cards")).toContainText("пальто, которое она надела");
+
+  await page.reload();
+  await expect(page.locator("#vocabulary-cards article")).toHaveCount(1);
+  await expect(page.locator("#vocabulary-cards")).toContainText("took off");
+});
+
+test("пользователь сохраняет словоформу под основной формой, сохраняя исходную форму в контексте", async ({ page }) => {
+  await page.goto("/src/panel.html");
+  await configureApi(page);
+  await page.getByRole("button", { name: "Перевести" }).click();
+  const phrasalVerb = page.locator("#word-meanings li").filter({ hasText: "took off —" });
+  await phrasalVerb.getByRole("button", { name: "Сохранить" }).click();
+
+  const card = page.locator("#vocabulary-cards article");
+  await expect(card.locator("h3")).toHaveText("take off");
+  await expect(card).toContainText("took off: She took off her coat and wore her coat.");
+  await expect(card).toContainText("She took off her shoes.");
+});
+
+test("пользователь сохраняет выделенное устойчивое выражение отдельной карточкой", async ({ page }) => {
+  await page.goto("/src/panel.html");
+  await configureApi(page);
+  await page.locator("#source-text").evaluate((textarea) => {
+    textarea.value = "She let the cat out of the bag.";
+    textarea.setSelectionRange(4, 30);
+    textarea.dispatchEvent(new Event("select", { bubbles: true }));
+  });
+  await page.getByRole("button", { name: "Сохранить выделенное выражение" }).click();
+  await page.locator("#expression-meaning").fill("раскрыть секрет");
+  await page.getByRole("button", { name: "Сохранить выражение" }).click();
+
+  const expression = page.locator("#vocabulary-cards article");
+  await expect(expression).toHaveCount(1);
+  await expect(expression).toContainText("let the cat out of the bag");
+  await expect(expression).toContainText("раскрыть секрет");
+  await expect(expression).toContainText("She finally let the cat out of the bag.");
 });
 
 test("ошибка API показывается, а исходное выделение остаётся в поле", async ({ page, request }) => {

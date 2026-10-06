@@ -10,9 +10,9 @@ const createTranslationResponse = () => ({
   choices: [{ message: { content: JSON.stringify({
     sentence_translation: "Она сняла пальто и надела пальто.",
     words: [
-      { text: "coat", meaning: "пальто, которое она надела", start: 35, end: 39 },
-      { text: "took off", meaning: "сняла (одежду)", start: 4, end: 12 },
-      { text: "coat", meaning: "пальто, которое она сняла", start: 17, end: 21 }
+      { text: "coat", lemma: "coat", meaning: "пальто, которое она надела", examples: ["He wore a warm coat.", "Hang your coat by the door."], start: 35, end: 39 },
+      { text: "took off", lemma: "take off", meaning: "сняла (одежду)", examples: ["She took off her shoes.", "Take off your jacket."], start: 4, end: 12 },
+      { text: "coat", lemma: "coat", meaning: "пальто, которое она сняла", examples: ["She bought a new coat.", "His coat was covered in snow."], start: 17, end: 21 }
     ]
   }) } }]
 });
@@ -22,15 +22,15 @@ const server = http.createServer((request, response) => {
   if (request.url === "/__test/chrome-mock.js") {
     response.writeHead(200, { "Content-Type": "text/javascript" }).end(`
       (() => {
-        const values = { settings: {}, pendingSelection: "She took off her coat and wore her coat." };
+        const values = JSON.parse(localStorage.getItem("lexideck-test-storage") || '{"settings":{},"pendingSelection":"She took off her coat and wore her coat."}');
         const sessionValues = {};
         const listeners = [];
         window.__chromeValues = values;
         window.chrome = { storage: {
           local: {
             get: async (key) => ({ [key]: values[key] }),
-            set: async (next) => { Object.assign(values, next); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
-            remove: async (key) => { delete values[key]; }
+            set: async (next) => { Object.assign(values, next); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
+            remove: async (key) => { delete values[key]; localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); }
           },
           session: {
             get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, sessionValues[key]])),
@@ -75,9 +75,12 @@ const server = http.createServer((request, response) => {
       lastRequest = { headers: request.headers, body: JSON.parse(raw) };
       apiRequests.push(lastRequest);
       const isVision = Array.isArray(lastRequest.body.messages?.[1]?.content);
+      const isExpressionExamples = lastRequest.body.messages?.[0]?.content.includes("Сгенерируй два дополнительных примера");
       const body = isVision
         ? { choices: [{ message: { content: JSON.stringify({ dialogues: ["She took of her coat and wore her coat."] }) } }] }
-        : apiBody;
+        : isExpressionExamples
+          ? { choices: [{ message: { content: JSON.stringify({ examples: ["She finally let the cat out of the bag.", "He let the cat out of the bag by accident."] }) } }] }
+          : apiBody;
       response.writeHead(apiStatus, { "Content-Type": "application/json" }).end(JSON.stringify(body));
     });
     return;
