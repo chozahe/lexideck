@@ -37,24 +37,20 @@ function parseCompletion(content, sourceText) {
   if (typeof result.sentence_translation !== "string" || !Array.isArray(result.words)) {
     throw new Error("Ответ API не содержит перевод предложения и список слов.");
   }
+  const source = Array.from(sourceText, (character) => character.toLowerCase());
   for (const word of result.words) {
     if (typeof word.text !== "string" || typeof word.meaning !== "string") {
       throw new Error("Ответ API содержит слово без текста или значения.");
     }
+    if (!Number.isInteger(word.start) || !Number.isInteger(word.end) || word.start < 0 || word.end <= word.start) {
+      throw new Error("Ответ API не содержит корректные позиции слов в исходном тексте.");
+    }
+    if (source.slice(word.start, word.end).join("") !== word.text.toLowerCase()) {
+      throw new Error("Позиция слова в ответе API не совпадает с исходным текстом.");
+    }
   }
-  const source = sourceText.toLowerCase();
   result.words = result.words
-    .map((word, index) => ({
-      word,
-      index,
-      sourcePosition: source.indexOf(word.text.toLowerCase())
-    }))
-    .sort((left, right) => {
-      if (left.sourcePosition < 0) return right.sourcePosition < 0 ? left.index - right.index : 1;
-      if (right.sourcePosition < 0) return -1;
-      return left.sourcePosition - right.sourcePosition || left.index - right.index;
-    })
-    .map(({ word }) => word);
+    .sort((left, right) => left.start - right.start);
   return result;
 }
 
@@ -80,7 +76,7 @@ async function translate(text) {
         temperature: 0.2,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: `Переведи текст с ${config.sourceLanguage} на ${config.targetLanguage}. Верни только JSON-объект: {"sentence_translation":"перевод всего текста","words":[{"text":"слово или выражение в исходном порядке","meaning":"значение в данном контексте"}]}. Добавь разбор всех содержательных слов, сохраняя исходный порядок.` },
+          { role: "system", content: `Переведи текст с ${config.sourceLanguage} на ${config.targetLanguage}. Верни только JSON-объект: {"sentence_translation":"перевод всего текста","words":[{"text":"точный фрагмент исходного текста","meaning":"значение в данном контексте","start":0,"end":4}]}. Добавь разбор всех содержательных слов в порядке текста. start и end — нулевая позиция и исключительная конечная позиция фрагмента в символах Unicode исходного текста; указывай точные границы каждого вхождения, включая повторяющиеся слова.` },
           { role: "user", content: text }
         ]
       })

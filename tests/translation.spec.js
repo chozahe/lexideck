@@ -16,19 +16,22 @@ test("пользователь получает перевод и значени
   await page.goto("/src/panel.html");
   await configureApi(page);
   await expect(page.getByText("Настройки сохранены на этом устройстве.")).toBeVisible();
-  await expect(page.locator("#source-text")).toHaveValue("She took off her coat.");
+  await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
 
   await page.getByRole("button", { name: "Перевести" }).click();
 
-  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто.");
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
   await expect(page.locator("#word-meanings li")).toHaveText([
     "took off — сняла (одежду)",
-    "coat — пальто"
+    "coat — пальто, которое она сняла",
+    "coat — пальто, которое она надела"
   ]);
   const call = await (await request.get("/__test/last-request")).json();
   expect(call.headers.authorization).toBe("Bearer test-secret");
   expect(call.body.model).toBe("controlled-model");
-  expect(call.body.messages[1].content).toBe("She took off her coat.");
+  expect(call.body.messages[0].content).toContain('"start":0,"end":4');
+  expect(call.body.messages[0].content).toContain("включая повторяющиеся слова");
+  expect(call.body.messages[1].content).toBe("She took off her coat and wore her coat.");
 });
 
 test("ошибка API показывается, а исходное выделение остаётся в поле", async ({ page, request }) => {
@@ -38,5 +41,5 @@ test("ошибка API показывается, а исходное выдел�
   await page.getByRole("button", { name: "Перевести" }).click();
 
   await expect(page.getByRole("alert")).toContainText("API вернул ошибку 401");
-  await expect(page.locator("#source-text")).toHaveValue("She took off her coat.");
+  await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
 });

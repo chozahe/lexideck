@@ -5,21 +5,23 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 let lastRequest;
 let apiStatus = 200;
-let apiBody = {
+const createTranslationResponse = () => ({
   choices: [{ message: { content: JSON.stringify({
-    sentence_translation: "Она сняла пальто.",
+    sentence_translation: "Она сняла пальто и надела пальто.",
     words: [
-          { text: "coat", meaning: "пальто" },
-          { text: "took off", meaning: "сняла (одежду)" }
+      { text: "coat", meaning: "пальто, которое она надела", start: 35, end: 39 },
+      { text: "took off", meaning: "сняла (одежду)", start: 4, end: 12 },
+      { text: "coat", meaning: "пальто, которое она сняла", start: 17, end: 21 }
     ]
   }) } }]
-};
+});
+let apiBody = createTranslationResponse();
 
 const server = http.createServer((request, response) => {
   if (request.url === "/__test/chrome-mock.js") {
     response.writeHead(200, { "Content-Type": "text/javascript" }).end(`
       (() => {
-        const values = { settings: {}, pendingSelection: "She took off her coat." };
+        const values = { settings: {}, pendingSelection: "She took off her coat and wore her coat." };
         const listeners = [];
         window.chrome = { storage: {
           local: {
@@ -36,15 +38,7 @@ const server = http.createServer((request, response) => {
   if (request.url === "/__test/reset" && request.method === "POST") {
     lastRequest = undefined;
     apiStatus = 200;
-    apiBody = {
-      choices: [{ message: { content: JSON.stringify({
-        sentence_translation: "Она сняла пальто.",
-        words: [
-          { text: "coat", meaning: "пальто" },
-          { text: "took off", meaning: "сняла (одежду)" }
-        ]
-      }) } }]
-    };
+    apiBody = createTranslationResponse();
     response.writeHead(204).end();
     return;
   }
