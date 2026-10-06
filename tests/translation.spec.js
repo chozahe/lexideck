@@ -8,6 +8,102 @@ async function configureApi(page) {
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
 }
 
+async function selectComicRegion(page) {
+  await page.addInitScript(() => {
+    const makeEvent = () => {
+      const listeners = [];
+      return {
+        listeners,
+        addListener(listener) { listeners.push(listener); },
+        emit(...args) { listeners.forEach((listener) => listener(...args)); }
+      };
+    };
+    const runtimeMessages = makeEvent();
+    runtimeMessages.addListener = (listener) => {
+      runtimeMessages.listeners.push(listener);
+      window.__contentMessageListener = listener;
+    };
+    const changed = makeEvent();
+    const sessionValues = {};
+    window.__pendingRuntimeMessages = [];
+    window.__sessionValues = sessionValues;
+    window.chrome = {
+      runtime: {
+        onInstalled: makeEvent(),
+        onMessage: runtimeMessages,
+        sendMessage(message) {
+          const jobs = runtimeMessages.listeners.map((listener) => new Promise((resolve) => {
+            let responded = false;
+            const result = listener(message, { tab: { windowId: 4 } }, (value) => {
+              responded = true;
+              resolve(value);
+            });
+            if (result !== true && !responded) resolve(undefined);
+          }));
+          const pending = Promise.all(jobs);
+          window.__pendingRuntimeMessages.push(pending);
+          return pending;
+        }
+      },
+      storage: {
+        local: {
+          get: async (key) => ({ [key]: undefined }),
+          set: async () => {},
+          remove: async () => {}
+        },
+        session: {
+          get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, sessionValues[key]])),
+          set: async (next) => {
+            Object.assign(sessionValues, next);
+            changed.emit(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue }])), "session");
+          },
+          remove: async (key) => { delete sessionValues[key]; }
+        },
+        onChanged: changed
+      },
+      contextMenus: { onInstalled: makeEvent(), onClicked: makeEvent(), removeAll: (callback) => callback(), create: () => {} },
+      commands: { onCommand: makeEvent() },
+      sidePanel: { open: async () => {} },
+      tabs: {
+        captureVisibleTab: async () => window.__screenshot,
+        sendMessage: async () => ({ text: "" })
+      }
+    };
+  });
+  await page.goto("/manifest.json");
+  await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#ff0000";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#0000ff";
+    context.fillRect(100, 100, 80, 70);
+    window.__screenshot = canvas.toDataURL("image/png");
+  });
+  await page.addScriptTag({ path: require("node:path").join(__dirname, "../src/background.js") });
+  await page.addScriptTag({ path: require("node:path").join(__dirname, "../src/content.js") });
+  await page.evaluate(() => window.__contentMessageListener({ type: "LEXIDECK_START_REGION_SELECTION" }));
+  await page.mouse.move(100, 100);
+  await page.mouse.down();
+  await page.mouse.move(180, 170);
+  await page.mouse.up();
+  return page.evaluate(async () => {
+    await Promise.all(window.__pendingRuntimeMessages);
+    const image = window.__sessionValues.pendingComicImage;
+    const bitmap = await createImageBitmap(await (await fetch(image)).blob());
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    context.drawImage(bitmap, 0, 0);
+    const pixel = [...context.getImageData(40, 35, 1, 1).data].slice(0, 3);
+    bitmap.close();
+    return { image, width: canvas.width, height: canvas.height, pixel };
+  });
+}
+
 test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
@@ -42,4 +138,30 @@ test("ошибка API показывается, а исходное выдел�
 
   await expect(page.getByRole("alert")).toContainText("API вернул ошибку 401");
   await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
+});
+
+test("область комикса распознаётся vision-моделью, текст можно исправить и перевести", async ({ page, request }) => {
+  const crop = await selectComicRegion(page);
+  expect(crop.width).toBe(80);
+  expect(crop.height).toBe(70);
+  expect(crop.pixel).toEqual([0, 0, 255]);
+  const selectedCrop = crop.image;
+  await page.goto("/src/panel.html");
+  await configureApi(page);
+  await page.evaluate((image) => window.chrome.storage.session.set({ pendingComicImage: image }), selectedCrop);
+
+  await expect(page.locator("#source-text")).toHaveValue("She took of her coat and wore her coat.");
+  await expect(page.locator("#comic-status")).toContainText("исправьте реплики");
+  await page.locator("#source-text").fill("She took off her coat and wore her coat.");
+  await page.getByRole("button", { name: "Подтвердить текст и перевести" }).click();
+
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+  const calls = await (await request.get("/__test/requests")).json();
+  expect(calls).toHaveLength(2);
+  expect(calls[0].body.messages[1].content).toEqual([
+    { type: "text", text: "Извлеки текст из выбранного фрагмента комикса." },
+    { type: "image_url", image_url: { url: selectedCrop } }
+  ]);
+  expect(calls[1].body.messages[1].content).toBe("She took off her coat and wore her coat.");
+  expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicImage");
 });

@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 let lastRequest;
+let apiRequests = [];
 let apiStatus = 200;
 const createTranslationResponse = () => ({
   choices: [{ message: { content: JSON.stringify({
@@ -22,12 +23,22 @@ const server = http.createServer((request, response) => {
     response.writeHead(200, { "Content-Type": "text/javascript" }).end(`
       (() => {
         const values = { settings: {}, pendingSelection: "She took off her coat and wore her coat." };
+        const sessionValues = {};
         const listeners = [];
+        window.__chromeValues = values;
         window.chrome = { storage: {
           local: {
             get: async (key) => ({ [key]: values[key] }),
             set: async (next) => { Object.assign(values, next); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
             remove: async (key) => { delete values[key]; }
+          },
+          session: {
+            get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, sessionValues[key]])),
+            set: async (next) => {
+              Object.assign(sessionValues, next);
+              listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue }])), "session"));
+            },
+            remove: async (key) => { delete sessionValues[key]; }
           },
           onChanged: { addListener: (listener) => listeners.push(listener) }
         }};
@@ -37,6 +48,7 @@ const server = http.createServer((request, response) => {
   }
   if (request.url === "/__test/reset" && request.method === "POST") {
     lastRequest = undefined;
+    apiRequests = [];
     apiStatus = 200;
     apiBody = createTranslationResponse();
     response.writeHead(204).end();
@@ -44,6 +56,10 @@ const server = http.createServer((request, response) => {
   }
   if (request.url === "/__test/last-request") {
     response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(lastRequest ?? null));
+    return;
+  }
+  if (request.url === "/__test/requests") {
+    response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(apiRequests));
     return;
   }
   if (request.url === "/__test/error" && request.method === "POST") {
@@ -57,7 +73,12 @@ const server = http.createServer((request, response) => {
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
       lastRequest = { headers: request.headers, body: JSON.parse(raw) };
-      response.writeHead(apiStatus, { "Content-Type": "application/json" }).end(JSON.stringify(apiBody));
+      apiRequests.push(lastRequest);
+      const isVision = Array.isArray(lastRequest.body.messages?.[1]?.content);
+      const body = isVision
+        ? { choices: [{ message: { content: JSON.stringify({ dialogues: ["She took of her coat and wore her coat."] }) } }] }
+        : apiBody;
+      response.writeHead(apiStatus, { "Content-Type": "application/json" }).end(JSON.stringify(body));
     });
     return;
   }

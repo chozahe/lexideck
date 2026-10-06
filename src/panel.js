@@ -20,8 +20,7 @@ function showError(message) {
 }
 
 async function loadSettings() {
-  const { settings = {} } = await chrome.storage.local.get("settings");
-  const saved = { ...DEFAULT_SETTINGS, ...settings };
+  const saved = await currentSettings();
   Object.entries(form).forEach(([key, input]) => { input.value = saved[key]; });
 }
 
@@ -29,6 +28,33 @@ async function saveSettings() {
   const settings = Object.fromEntries(Object.entries(form).map(([key, input]) => [key, input.value.trim()]));
   await chrome.storage.local.set({ settings });
   $("settings-status").textContent = "Настройки сохранены на этом устройстве.";
+}
+
+async function apiCompletion(messages, config) {
+  if (!config.apiUrl || !config.apiKey || !config.model) throw new Error("Заполните URL API, ключ и модель в настройках.");
+  let response;
+  try {
+    response = await fetch(completionUrl(config.apiUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + config.apiKey },
+      body: JSON.stringify({ model: config.model, temperature: 0.2, response_format: { type: "json_object" }, messages })
+    });
+  } catch (error) {
+    throw new Error("Не удалось связаться с API: " + error.message);
+  }
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 400);
+    throw new Error("API вернул ошибку " + response.status + (detail ? ": " + detail : "."));
+  }
+  const payload = await response.json();
+  const content = payload.choices?.[0]?.message?.content;
+  if (typeof content !== "string") throw new Error("Ответ API не содержит текста.");
+  return content;
+}
+
+async function currentSettings() {
+  const { settings = {} } = await chrome.storage.local.get("settings");
+  return { ...DEFAULT_SETTINGS, ...settings };
 }
 
 function parseCompletion(content, sourceText) {
@@ -61,37 +87,70 @@ function completionUrl(baseUrl) {
 }
 
 async function translate(text) {
-  const { settings = {} } = await chrome.storage.local.get("settings");
-  const config = { ...DEFAULT_SETTINGS, ...settings };
-  if (!config.apiUrl || !config.apiKey || !config.model) {
-    throw new Error("Заполните URL API, ключ и модель в настройках.");
-  }
-  let response;
-  try {
-    response = await fetch(completionUrl(config.apiUrl), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: `Переведи текст с ${config.sourceLanguage} на ${config.targetLanguage}. Верни только JSON-объект: {"sentence_translation":"перевод всего текста","words":[{"text":"точный фрагмент исходного текста","meaning":"значение в данном контексте","start":0,"end":4}]}. Добавь разбор всех содержательных слов в порядке текста. start и end — нулевая позиция и исключительная конечная позиция фрагмента в символах Unicode исходного текста; указывай точные границы каждого вхождения, включая повторяющиеся слова.` },
-          { role: "user", content: text }
-        ]
-      })
-    });
-  } catch (error) {
-    throw new Error(`Не удалось связаться с API: ${error.message}`);
-  }
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 400);
-    throw new Error(`API вернул ошибку ${response.status}${detail ? `: ${detail}` : "."}`);
-  }
-  const payload = await response.json();
-  const content = payload.choices?.[0]?.message?.content;
-  if (typeof content !== "string") throw new Error("Ответ API не содержит текста перевода.");
+  const config = await currentSettings();
+  const content = await apiCompletion([
+    {
+      role: "system",
+      content: "Переведи текст с " + config.sourceLanguage + " на " + config.targetLanguage +
+        '. Верни только JSON-объект: {"sentence_translation":"перевод всего текста","words":[{"text":"точный фрагмент исходного текста","meaning":"значение в данном контексте","start":0,"end":4}]}. ' +
+        "Добавь разбор всех содержательных слов в порядке текста. start и end — нулевая позиция и исключительная конечная позиция фрагмента в символах Unicode исходного текста; " +
+        "указывай точные границы каждого вхождения, включая повторяющиеся слова."
+    },
+    { role: "user", content: text }
+  ], config);
   return parseCompletion(content, text);
+}
+
+async function extractComicText(image) {
+  const config = await currentSettings();
+  const content = await apiCompletion([
+    {
+      role: "system",
+      content: "Извлеки все реплики и предложения, читаемые на изображении комикса, на языке " +
+        config.sourceLanguage +
+        ". Сохрани исходное написание, пунктуацию и порядок чтения. Не переводи и не добавляй описаний. " +
+        'Верни только JSON-объект вида {"dialogues":["первая реплика","вторая реплика"]}.'
+    },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Извлеки текст из выбранного фрагмента комикса." },
+        { type: "image_url", image_url: { url: image } }
+      ]
+    }
+  ], config);
+  const cleaned = content.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, "").replace(/\s*\x60\x60\x60$/, "");
+  const result = JSON.parse(cleaned);
+  if (!Array.isArray(result.dialogues) || result.dialogues.some((line) => typeof line !== "string")) {
+    throw new Error("Ответ модели не содержит список извлечённых реплик.");
+  }
+  const dialogues = result.dialogues.map((line) => line.trim()).filter(Boolean);
+  if (!dialogues.length) throw new Error("На выбранной области не удалось распознать текст.");
+  return dialogues.join("\n");
+}
+
+async function handleComicImage(image) {
+  $("comic-status").textContent = "Распознаём текст на изображении…";
+  showError("");
+  try {
+    $("source-text").value = await extractComicText(image);
+    $("result").hidden = true;
+    $("comic-status").textContent = "Проверьте и при необходимости исправьте реплики, затем подтвердите текст кнопкой ниже.";
+  } catch (error) {
+    $("comic-status").textContent = "";
+    showError(error.message || "Не удалось распознать текст на изображении.");
+  }
+}
+
+async function consumePendingComic({ pendingComicImage, pendingComicError }) {
+  if (pendingComicImage) {
+    await chrome.storage.session.remove("pendingComicImage");
+    await handleComicImage(pendingComicImage);
+  }
+  if (pendingComicError) {
+    showError(pendingComicError);
+    await chrome.storage.session.remove("pendingComicError");
+  }
 }
 
 function renderResult(result) {
@@ -117,7 +176,7 @@ async function runTranslation() {
     showError(error.message || "Не удалось выполнить перевод.");
   } finally {
     $("translate").disabled = false;
-    $("translate").textContent = "Перевести";
+    $("translate").textContent = "Подтвердить текст и перевести";
   }
 }
 
@@ -146,6 +205,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     $("source-text").value = changes.pendingSelection.newValue;
     void chrome.storage.local.remove("pendingSelection");
   }
+  if (areaName === "session") {
+    void consumePendingComic({
+      pendingComicImage: changes.pendingComicImage?.newValue,
+      pendingComicError: changes.pendingComicError?.newValue
+    });
+  }
 });
 
 void loadSettings().then(async () => {
@@ -154,4 +219,6 @@ void loadSettings().then(async () => {
     $("source-text").value = pendingSelection;
     await chrome.storage.local.remove("pendingSelection");
   }
+  const comicState = await chrome.storage.session.get(["pendingComicImage", "pendingComicError"]);
+  await consumePendingComic(comicState);
 }).catch((error) => showError(`Не удалось загрузить настройки: ${error.message}`));
