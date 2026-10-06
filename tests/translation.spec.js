@@ -153,6 +153,7 @@ test("пользователь сохраняет словоформу под о
   await page.goto("/src/panel.html");
   await configureApi(page);
   await page.getByRole("button", { name: "Перевести" }).click();
+  await page.locator("#source-text").fill("Edited after translation");
   const phrasalVerb = page.locator("#word-meanings li").filter({ hasText: "took off —" });
   await phrasalVerb.getByRole("button", { name: "Сохранить" }).click();
 

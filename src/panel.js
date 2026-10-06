@@ -188,7 +188,12 @@ async function saveWord(word) {
     meaning = { text: word.meaning.trim(), contexts: [], examples: [] };
     card.meanings.push(meaning);
   }
-  const context = { form: word.text, text: $("source-text").value.trim(), start: word.start, end: word.end };
+  const context = {
+    form: word.text,
+    text: translatedSourceText,
+    start: word.start,
+    end: word.end
+  };
   if (!meaning.contexts.some((item) => item.form === context.form && item.text === context.text && item.start === context.start && item.end === context.end)) {
     meaning.contexts.push(context);
   }
@@ -198,6 +203,7 @@ async function saveWord(word) {
 }
 
 let selectedExpression;
+let translatedSourceText = "";
 
 function updateSelectedExpression() {
   const source = $("source-text");
@@ -298,7 +304,8 @@ async function renderCards() {
   $("vocabulary-empty").hidden = cards.length > 0;
 }
 
-function renderResult(result) {
+function renderResult(result, sourceText) {
+  translatedSourceText = sourceText;
   $("sentence-translation").textContent = result.sentence_translation;
   const list = $("word-meanings");
   list.replaceChildren(...result.words.map((word) => {
@@ -331,7 +338,7 @@ async function runTranslation() {
   $("translate").disabled = true;
   $("translate").textContent = "Переводим…";
   try {
-    renderResult(await translate(text));
+    renderResult(await translate(text), text);
   } catch (error) {
     showError(error.message || "Не удалось выполнить перевод.");
   } finally {
