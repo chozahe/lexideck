@@ -9,8 +9,8 @@ let apiBody = {
   choices: [{ message: { content: JSON.stringify({
     sentence_translation: "Она сняла пальто.",
     words: [
-      { text: "took off", meaning: "сняла (одежду)" },
-      { text: "coat", meaning: "пальто" }
+          { text: "coat", meaning: "пальто" },
+          { text: "took off", meaning: "сняла (одежду)" }
     ]
   }) } }]
 };
@@ -40,8 +40,8 @@ const server = http.createServer((request, response) => {
       choices: [{ message: { content: JSON.stringify({
         sentence_translation: "Она сняла пальто.",
         words: [
-          { text: "took off", meaning: "сняла (одежду)" },
-          { text: "coat", meaning: "пальто" }
+          { text: "coat", meaning: "пальто" },
+          { text: "took off", meaning: "сняла (одежду)" }
         ]
       }) } }]
     };

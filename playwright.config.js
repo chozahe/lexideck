@@ -7,8 +7,7 @@ module.exports = defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4173",
     browserName: "chromium",
-    headless: true,
-    launchOptions: { executablePath: "/usr/bin/chromium", args: ["--no-sandbox"] }
+    headless: true
   },
   webServer: {
     command: "node tests/server.js",

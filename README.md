@@ -20,6 +20,7 @@ URL можно указать как адрес API, например `https://a
 ## Проверки
 
 ```sh
+npx playwright install chromium
 npm run typecheck
 npm test
 npm run build

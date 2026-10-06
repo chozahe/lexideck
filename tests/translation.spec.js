@@ -1,16 +1,20 @@
 const { test, expect } = require("@playwright/test");
 
+async function configureApi(page) {
+  await page.getByRole("button", { name: "Настройки API" }).click();
+  await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
+  await page.locator("#model").fill("controlled-model");
+  await page.locator("#api-key").fill("test-secret");
+  await page.getByRole("button", { name: "Сохранить настройки" }).click();
+}
+
 test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
 test("пользователь получает перевод и значения слов по порядку через API", async ({ page, request }) => {
   await page.goto("/src/panel.html");
-  await page.getByRole("button", { name: "Настройки API" }).click();
-  await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
-  await page.locator("#model").fill("controlled-model");
-  await page.locator("#api-key").fill("test-secret");
-  await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await configureApi(page);
   await expect(page.getByText("Настройки сохранены на этом устройстве.")).toBeVisible();
   await expect(page.locator("#source-text")).toHaveValue("She took off her coat.");
 
@@ -30,11 +34,7 @@ test("пользователь получает перевод и значени
 test("ошибка API показывается, а исходное выделение остаётся в поле", async ({ page, request }) => {
   await request.post("/__test/error");
   await page.goto("/src/panel.html");
-  await page.getByRole("button", { name: "Настройки API" }).click();
-  await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
-  await page.locator("#model").fill("controlled-model");
-  await page.locator("#api-key").fill("test-secret");
-  await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await configureApi(page);
   await page.getByRole("button", { name: "Перевести" }).click();
 
   await expect(page.getByRole("alert")).toContainText("API вернул ошибку 401");

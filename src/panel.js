@@ -31,7 +31,7 @@ async function saveSettings() {
   $("settings-status").textContent = "Настройки сохранены на этом устройстве.";
 }
 
-function parseCompletion(content) {
+function parseCompletion(content, sourceText) {
   const cleaned = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const result = JSON.parse(cleaned);
   if (typeof result.sentence_translation !== "string" || !Array.isArray(result.words)) {
@@ -42,6 +42,19 @@ function parseCompletion(content) {
       throw new Error("Ответ API содержит слово без текста или значения.");
     }
   }
+  const source = sourceText.toLowerCase();
+  result.words = result.words
+    .map((word, index) => ({
+      word,
+      index,
+      sourcePosition: source.indexOf(word.text.toLowerCase())
+    }))
+    .sort((left, right) => {
+      if (left.sourcePosition < 0) return right.sourcePosition < 0 ? left.index - right.index : 1;
+      if (right.sourcePosition < 0) return -1;
+      return left.sourcePosition - right.sourcePosition || left.index - right.index;
+    })
+    .map(({ word }) => word);
   return result;
 }
 
@@ -82,7 +95,7 @@ async function translate(text) {
   const payload = await response.json();
   const content = payload.choices?.[0]?.message?.content;
   if (typeof content !== "string") throw new Error("Ответ API не содержит текста перевода.");
-  return parseCompletion(content);
+  return parseCompletion(content, text);
 }
 
 function renderResult(result) {

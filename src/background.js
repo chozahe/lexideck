@@ -29,7 +29,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     const response = await chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_GET_SELECTION" });
     if (response?.text?.trim()) await chrome.storage.local.set({ pendingSelection: response.text.trim() });
   } catch {
-    // Restricted browser pages cannot receive content script messages.
+    // На ограниченных страницах браузера нельзя отправить сообщение content script.
   }
   await opening;
 });
