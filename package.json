@@ -1,0 +1,25 @@
+{
+  "name": "lexideck",
+  "version": "0.1.0",
+  "description": "Локальное расширение для перевода выделенного текста",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "node --check src/background.js && node --check src/content.js && node --check src/panel.js && node --check tests/server.js && node --check tests/translation.spec.js && node --check scripts/build.js && node --check playwright.config.js",
+    "build": "node scripts/build.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chozahe/lexideck.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/chozahe/lexideck/issues"
+  },
+  "homepage": "https://github.com/chozahe/lexideck#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

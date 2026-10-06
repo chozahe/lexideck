@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Lexideck",
+  "version": "0.1.0",
+  "description": "Перевод выделенного текста и разбор слов в контексте.",
+  "permissions": ["storage", "contextMenus", "sidePanel"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "src/background.js" },
+  "side_panel": { "default_path": "src/panel.html" },
+  "commands": {
+    "translate-selection": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Перевести выделенный текст"
+    }
+  },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["src/content.js"],
+    "run_at": "document_idle"
+  }]
+}

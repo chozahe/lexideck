@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lexideck — перевод</title>
+    <link rel="stylesheet" href="panel.css">
+    <script type="module" src="panel.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Lexideck</h1>
+        <button id="settings-toggle" class="subtle" type="button" aria-expanded="false">Настройки API</button>
+      </header>
+
+      <section id="settings" hidden>
+        <h2>Языки и API</h2>
+        <label>Исходный язык<input id="source-language" value="English" autocomplete="off"></label>
+        <label>Язык перевода<input id="target-language" value="Русский" autocomplete="off"></label>
+        <label>URL API<input id="api-url" type="url" placeholder="https://api.example.com/v1" autocomplete="url"></label>
+        <label>Идентификатор модели<input id="model" autocomplete="off" placeholder="gpt-4o-mini"></label>
+        <label>Ключ API<input id="api-key" type="password" autocomplete="off"></label>
+        <button id="save-settings" type="button">Сохранить настройки</button>
+        <p id="settings-status" role="status"></p>
+      </section>
+
+      <section>
+        <label for="source-text">Текст для перевода</label>
+        <textarea id="source-text" rows="5" placeholder="Выделите текст на странице или введите его здесь"></textarea>
+        <button id="translate" type="button">Перевести</button>
+        <p id="error" role="alert"></p>
+      </section>
+
+      <section id="result" aria-live="polite" hidden>
+        <h2>Перевод</h2>
+        <p id="sentence-translation"></p>
+        <h2>Слова по порядку</h2>
+        <ol id="word-meanings"></ol>
+      </section>
+    </main>
+  </body>
+</html>

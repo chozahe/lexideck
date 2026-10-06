@@ -1,0 +1,18 @@
+:root { color-scheme: light dark; font: 15px/1.5 system-ui, sans-serif; }
+body { margin: 0; padding: 20px; min-width: 280px; }
+main { max-width: 680px; margin: 0 auto; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 { font-size: 1.35rem; margin: 0; }
+h2 { font-size: 1rem; margin: 20px 0 8px; }
+label { display: grid; gap: 4px; margin: 12px 0; }
+input, textarea, button { box-sizing: border-box; font: inherit; }
+input, textarea { width: 100%; padding: 9px; border: 1px solid #8888; border-radius: 6px; }
+textarea { resize: vertical; }
+button { padding: 9px 12px; border: 0; border-radius: 6px; cursor: pointer; }
+section > button { width: 100%; margin-top: 8px; }
+button:disabled { opacity: .6; cursor: wait; }
+.subtle { background: transparent; text-decoration: underline; }
+#error { color: #c33; white-space: pre-wrap; }
+#settings-status { color: #287a35; }
+#word-meanings { padding-left: 24px; }
+#word-meanings li { padding: 3px 0; }
