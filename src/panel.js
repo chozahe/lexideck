@@ -1,3 +1,6 @@
+import { setupReview } from "./review.js";
+import { updateCards } from "./cards.js";
+
 const DEFAULT_SETTINGS = {
   sourceLanguage: "English",
   targetLanguage: "Русский",
@@ -176,29 +179,29 @@ function appendUnique(target, values) {
 }
 
 async function saveWord(word) {
-  const { cards = [] } = await chrome.storage.local.get("cards");
-  const headword = word.lemma.trim();
-  let card = cards.find((item) => item.kind === "word" && normalizeTerm(item.headword) === normalizeTerm(headword));
-  if (!card) {
-    card = { id: `${Date.now()}-${Math.random()}`, kind: "word", headword, meanings: [] };
-    cards.push(card);
-  }
-  let meaning = card.meanings.find((item) => normalizeTerm(item.text) === normalizeTerm(word.meaning));
-  if (!meaning) {
-    meaning = { text: word.meaning.trim(), contexts: [], examples: [] };
-    card.meanings.push(meaning);
-  }
-  const context = {
-    form: word.text,
-    text: translatedSourceText,
-    start: word.start,
-    end: word.end
-  };
-  if (!meaning.contexts.some((item) => item.form === context.form && item.text === context.text && item.start === context.start && item.end === context.end)) {
-    meaning.contexts.push(context);
-  }
-  appendUnique(meaning.examples, word.examples);
-  await chrome.storage.local.set({ cards });
+  await updateCards((cards) => {
+    const headword = word.lemma.trim();
+    let card = cards.find((item) => item.kind === "word" && normalizeTerm(item.headword) === normalizeTerm(headword));
+    if (!card) {
+      card = { id: `${Date.now()}-${Math.random()}`, kind: "word", headword, meanings: [] };
+      cards.push(card);
+    }
+    let meaning = card.meanings.find((item) => normalizeTerm(item.text) === normalizeTerm(word.meaning));
+    if (!meaning) {
+      meaning = { text: word.meaning.trim(), contexts: [], examples: [] };
+      card.meanings.push(meaning);
+    }
+    const context = {
+      form: word.text,
+      text: translatedSourceText,
+      start: word.start,
+      end: word.end
+    };
+    if (!meaning.contexts.some((item) => item.form === context.form && item.text === context.text && item.start === context.start && item.end === context.end)) {
+      meaning.contexts.push(context);
+    }
+    appendUnique(meaning.examples, word.examples);
+  });
   await renderCards();
 }
 
@@ -239,22 +242,22 @@ async function saveExpression(event) {
   showError("");
   try {
     const examples = await requestExpressionExamples(expression.text, meaningText, sourceContext);
-    const { cards = [] } = await chrome.storage.local.get("cards");
-    let card = cards.find((item) => item.kind === "expression" && normalizeTerm(item.headword) === normalizeTerm(expression.text));
-    if (!card) {
-      card = { id: `${Date.now()}-${Math.random()}`, kind: "expression", headword: expression.text, meanings: [] };
-      cards.push(card);
-    }
-    let meaning = card.meanings.find((item) => normalizeTerm(item.text) === normalizeTerm(meaningText));
-    if (!meaning) {
-      meaning = { text: meaningText, contexts: [], examples: [] };
-      card.meanings.push(meaning);
-    }
-    if (!meaning.contexts.some((item) => item.text === sourceContext && item.start === expression.start && item.end === expression.end)) {
-      meaning.contexts.push({ form: expression.text, text: sourceContext, start: expression.start, end: expression.end });
-    }
-    appendUnique(meaning.examples, examples);
-    await chrome.storage.local.set({ cards });
+    await updateCards((cards) => {
+      let card = cards.find((item) => item.kind === "expression" && normalizeTerm(item.headword) === normalizeTerm(expression.text));
+      if (!card) {
+        card = { id: `${Date.now()}-${Math.random()}`, kind: "expression", headword: expression.text, meanings: [] };
+        cards.push(card);
+      }
+      let meaning = card.meanings.find((item) => normalizeTerm(item.text) === normalizeTerm(meaningText));
+      if (!meaning) {
+        meaning = { text: meaningText, contexts: [], examples: [] };
+        card.meanings.push(meaning);
+      }
+      if (!meaning.contexts.some((item) => item.text === sourceContext && item.start === expression.start && item.end === expression.end)) {
+        meaning.contexts.push({ form: expression.text, text: sourceContext, start: expression.start, end: expression.end });
+      }
+      appendUnique(meaning.examples, examples);
+    });
     await renderCards();
     $("expression-form").hidden = true;
     $("expression-meaning").value = "";
@@ -274,6 +277,16 @@ async function renderCards() {
     const heading = document.createElement("h3");
     heading.textContent = card.headword;
     article.append(heading);
+    const schedule = document.createElement("p");
+    if (card.schedule) {
+      const due = document.createElement("time");
+      due.dateTime = card.schedule.due;
+      due.textContent = new Date(card.schedule.due).toLocaleString("ru-RU");
+      schedule.append("Следующее повторение: ", due);
+    } else {
+      schedule.textContent = "Новая карточка";
+    }
+    article.append(schedule);
     for (const meaning of card.meanings) {
       const meaningHeading = document.createElement("p");
       meaningHeading.textContent = meaning.text;
@@ -391,6 +404,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     });
   }
 });
+
+setupReview(renderCards);
 
 void loadSettings().then(async () => {
   await renderCards();

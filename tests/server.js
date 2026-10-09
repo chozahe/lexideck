@@ -1,6 +1,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+require("../scripts/prepare-vendor.js");
 
 const root = path.resolve(__dirname, "..");
 let lastRequest;
@@ -28,9 +29,9 @@ const server = http.createServer((request, response) => {
         window.__chromeValues = values;
         window.chrome = { storage: {
           local: {
-            get: async (key) => ({ [key]: values[key] }),
-            set: async (next) => { Object.assign(values, next); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
-            remove: async (key) => { delete values[key]; localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); }
+            get: async (key) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}")); return structuredClone({ [key]: values[key] }); },
+            set: async (next) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"), structuredClone(next)); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
+            remove: async (key) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}")); delete values[key]; localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); }
           },
           session: {
             get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, sessionValues[key]])),

@@ -22,3 +22,11 @@ button:disabled { opacity: .6; cursor: wait; }
 #vocabulary-cards h3 { margin: 0 0 6px; font-size: 1rem; }
 #vocabulary-cards ul { margin: 4px 0; padding-left: 20px; }
 .card-context { color: #777; }
+#review-card { border: 1px solid #8886; border-radius: 8px; padding: 16px; margin-top: 12px; }
+#review-headword { font-size: 1.6rem; margin: 0 0 16px; overflow-wrap: anywhere; }
+#review-ratings { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+#review-settings { display: flex; align-items: end; gap: 8px; }
+#review-settings label { flex: 1; margin-bottom: 0; }
+#review-settings button { flex: 1; }
+#review-answer h4 { margin-bottom: 4px; }
+#review-answer ul { margin-top: 4px; padding-left: 20px; }

@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+require("./prepare-vendor.js");
 
 const root = path.resolve(__dirname, "..");
 const output = path.join(root, "dist");
