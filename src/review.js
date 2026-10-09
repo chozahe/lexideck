@@ -1,5 +1,6 @@
 import { createEmptyCard, fsrs } from "./vendor/ts-fsrs.js";
 import { updateCards } from "./cards.js";
+import { recordStudyReview, renderStudyStats } from "./study.js";
 
 const scheduler = fsrs();
 const $ = (id) => document.getElementById(id);
@@ -52,6 +53,7 @@ function showAnswer() {
 }
 
 export function setupReview(onReview) {
+  void renderStudyStats();
   void dailyLimit().then((limit) => { $("new-card-limit").value = limit; }).catch((error) => {
     $("review-settings-status").textContent = `Не удалось загрузить лимит: ${error.message}`;
   });
@@ -97,8 +99,10 @@ export function setupReview(onReview) {
           card.nextMeaning = (meaningIndex + 1) % card.meanings.length;
           card.reviewHistory = [...(card.reviewHistory || []), { ...JSON.parse(JSON.stringify(result.log)), meaningIndex }];
         });
+        await recordStudyReview();
         currentCard = undefined;
         $("review-card").hidden = true;
+        await renderStudyStats();
         await onReview();
         await nextCard();
       } catch (error) {

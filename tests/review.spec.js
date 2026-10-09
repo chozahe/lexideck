@@ -4,6 +4,42 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("оценка карточки обновляет серию и достижения, а пропуск дня сбрасывает серию", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-09T12:00:00") });
+  await page.goto("/src/panel.html");
+  await page.evaluate(async () => {
+    await chrome.storage.local.set({
+      cards: [{
+        id: "streak-card", kind: "word", headword: "word",
+        meanings: [{ text: "слово", contexts: [{ form: "word", text: "A word." }], examples: [] }]
+      }],
+      studyStats: { days: ["2026-10-07", "2026-10-08"], reviewCount: 0 }
+    });
+  });
+  await page.reload();
+  const review = page.locator("#review");
+  await expect(page.locator("#study-streak")).toHaveText("Серия занятий: 2 дня");
+  await expect(page.locator("#study-achievements")).toContainText("Пока не получено: Первый ответ");
+  await expect(page.locator("#study-achievements")).toContainText("Пока не получено: Серия из 3 дней");
+  await page.getByRole("button", { name: "Начать занятие" }).click();
+  await review.getByRole("button", { name: "Показать ответ" }).click();
+  await review.getByRole("button", { name: "Хорошо", exact: true }).click();
+  await expect(page.locator("#study-streak")).toHaveText("Серия занятий: 3 дня");
+  await expect(page.locator("#study-achievements")).toContainText("Получено: Первый ответ");
+  await expect(page.locator("#study-achievements")).toContainText("Получено: Серия из 3 дней");
+  await page.clock.setSystemTime(new Date("2026-10-11T12:00:00"));
+  await page.reload();
+  await expect(page.locator("#study-streak")).toHaveText("Серия занятий: 0 дней");
+  await expect(page.locator("#study-achievements")).toContainText("Получено: Первый ответ");
+  await expect(page.locator("#study-achievements")).toContainText("Получено: Серия из 3 дней");
+  const { cards, studyStats } = await page.evaluate(async () => ({
+    cards: (await chrome.storage.local.get("cards")).cards,
+    studyStats: (await chrome.storage.local.get("studyStats")).studyStats
+  }));
+  expect(cards[0].reviewHistory).toHaveLength(1);
+  expect(studyStats.reviewCount).toBe(1);
+});
+
 test("дневной лимит новых карточек равен 10, меняется и сохраняется между занятиями", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
   await page.goto("/src/panel.html");
