@@ -79,6 +79,10 @@
       </section>
       <section id="vocabulary">
         <h2>Словарь</h2>
+        <button id="export-backup" type="button">Скачать резервную копию</button>
+        <label for="import-backup">Восстановить словарь из файла</label>
+        <input id="import-backup" type="file" accept="application/json,.json">
+        <p id="backup-status" role="status" aria-live="polite"></p>
         <p id="vocabulary-empty">Пока нет сохранённых карточек.</p>
         <div id="vocabulary-cards"></div>
       </section>
