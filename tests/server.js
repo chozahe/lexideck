@@ -78,7 +78,7 @@ const server = http.createServer((request, response) => {
       const isVision = Array.isArray(lastRequest.body.messages?.[1]?.content);
       const isExpressionExamples = lastRequest.body.messages?.[0]?.content.includes("Сгенерируй два дополнительных примера");
       const body = isVision
-        ? { choices: [{ message: { content: JSON.stringify({ dialogues: ["She took of her coat and wore her coat."] }) } }] }
+        ? { choices: [{ message: { content: JSON.stringify({ dialogues: ["She took off her coat and wore her coat."] }) } }] }
         : isExpressionExamples
           ? { choices: [{ message: { content: JSON.stringify({ examples: ["She finally let the cat out of the bag.", "He let the cat out of the bag by accident."] }) } }] }
           : apiBody;

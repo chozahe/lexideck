@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 
 async function configureApi(page) {
   await page.getByRole("button", { name: "Настройки API" }).click();
-  await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
+  await page.locator("#api-url").fill(`${new URL(page.url()).origin}/v1`);
   await page.locator("#model").fill("controlled-model");
   await page.locator("#api-key").fill("test-secret");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
@@ -65,8 +65,10 @@ async function selectComicRegion(page) {
       commands: { onCommand: makeEvent() },
       sidePanel: { open: async () => {} },
       tabs: {
-        captureVisibleTab: async () => window.__screenshot,
-        sendMessage: async () => ({ text: "" })
+        captureVisibleTab: (_windowId, _options, callback) => callback(window.__screenshot),
+        sendMessage: (_tabId, message, callback) => {
+          if (message.type === "LEXIDECK_PREPARE_CAPTURE") window.__contentMessageListener(message, {}, callback);
+        }
       }
     };
   });
@@ -91,7 +93,7 @@ async function selectComicRegion(page) {
   await page.mouse.up();
   return page.evaluate(async () => {
     await Promise.all(window.__pendingRuntimeMessages);
-    const image = window.__sessionValues.pendingComicImage;
+    const image = window.__sessionValues.pendingComicRequest.image;
     const bitmap = await createImageBitmap(await (await fetch(image)).blob());
     const canvas = document.createElement("canvas");
     canvas.width = bitmap.width;
@@ -200,28 +202,29 @@ test("область комикса распознаётся vision-модель
   const selectedCrop = crop.image;
   await page.goto("/src/panel.html");
   await configureApi(page);
-  await page.evaluate((image) => window.chrome.storage.session.set({ pendingComicImage: image }), selectedCrop);
+  await page.evaluate((image) => window.chrome.storage.session.set({ pendingComicRequest: { id: "comic-1", state: "image", image } }), selectedCrop);
 
-  await expect(page.locator("#source-text")).toHaveValue("She took of her coat and wore her coat.");
-  await expect(page.locator("#comic-status")).toContainText("исправьте реплики");
-  await page.locator("#source-text").fill("She took off her coat and wore her coat.");
+  await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+  await page.locator("#source-text").fill("She took off her coat and wore her coat!");
   await page.getByRole("button", { name: "Перевести", exact: true }).click();
 
   await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
   const calls = await (await request.get("/__test/requests")).json();
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(3);
   expect(calls[0].body.messages[1].content).toEqual([
     { type: "text", text: "Извлеки текст из выбранного фрагмента комикса." },
     { type: "image_url", image_url: { url: selectedCrop } }
   ]);
   expect(calls[1].body.messages[1].content).toBe("She took off her coat and wore her coat.");
-  expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicImage");
+  expect(calls[2].body.messages[1].content).toBe("She took off her coat and wore her coat!");
+  expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicRequest");
 });
 
 async function prepareAutomaticTranslation(page) {
   await page.addInitScript(() => {
     localStorage.setItem("lexideck-test-storage", JSON.stringify({
-      settings: { apiUrl: "http://127.0.0.1:4173/v1", model: "controlled-model", apiKey: "test-secret" },
+      settings: { apiUrl: `${location.origin}/v1`, model: "controlled-model", apiKey: "test-secret" },
       pendingSelection: "She took off her coat and wore her coat."
     }));
   });
@@ -266,4 +269,64 @@ test("новое выделение заменяет запрос; запозд�
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(page.locator("#source-text")).toHaveValue("Edited text");
   await expect(page.locator("#sentence-translation")).toHaveText("Актуальный результат");
+});
+
+function comicRequest(id) {
+  return { id, state: "image", image: "data:image/png;base64,iVBORw0KGgo=" };
+}
+
+async function prepareComicPanel(page) {
+  await prepareAutomaticTranslation(page);
+  await page.goto("/src/panel.html");
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+}
+
+test("распознавание показывает ожидание и ошибку, не сохраняя изображение в постоянном хранилище", async ({ page }) => {
+  await prepareComicPanel(page);
+  let finishVision;
+  await page.route("**/v1/chat/completions", async (route) => {
+    await new Promise((resolve) => { finishVision = resolve; });
+    await route.fulfill({ status: 503, json: { error: "Не удалось распознать реплику" } });
+  });
+  await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("broken-image"));
+  await expect(page.locator("#comic-status")).toHaveText("Распознаём текст на изображении…");
+  await expect(page.locator("#result")).toBeHidden();
+  finishVision();
+  await expect(page.locator("#error")).toContainText("API вернул ошибку 503");
+  expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicRequest");
+  expect(await page.evaluate(() => JSON.stringify(window.__chromeValues))).not.toContain("data:image");
+});
+
+test("новый текст и новая область заменяют запоздалое распознавание", async ({ page }) => {
+  await prepareComicPanel(page);
+  let finishOldVision;
+  let visionStarted;
+  const started = new Promise((resolve) => { visionStarted = resolve; });
+  let images = 0;
+  await page.route("**/v1/chat/completions", async (route) => {
+    const text = route.request().postDataJSON().messages[1].content;
+    if (Array.isArray(text)) {
+      const imageNumber = ++images;
+      if (imageNumber === 1) {
+        visionStarted();
+        await new Promise((resolve) => { finishOldVision = resolve; });
+      }
+      await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ dialogues: [imageNumber === 1 ? "Old dialogue" : "New dialogue"] }) } }] } });
+    } else {
+      await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ sentence_translation: `Перевод: ${text}`, words: [] }) } }] } });
+    }
+  });
+  await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("old-image"));
+  await started;
+  await page.evaluate(() => chrome.storage.local.set({ pendingSelection: "New text" }));
+  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New text");
+  await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("new-image"));
+  await expect(page.locator("#source-text")).toHaveValue("New dialogue");
+  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New dialogue");
+  const oldResponse = page.waitForResponse((response) => Array.isArray(response.request().postDataJSON()?.messages?.[1]?.content));
+  finishOldVision();
+  await (await oldResponse).finished();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.locator("#source-text")).toHaveValue("New dialogue");
+  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New dialogue");
 });
