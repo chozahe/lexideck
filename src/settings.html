@@ -35,6 +35,16 @@
           <button type="submit">Сохранить настройки</button>
         </form>
         <p id="settings-status" role="status" aria-live="polite"></p>
+        <fieldset aria-labelledby="theme-heading">
+          <legend id="theme-heading">Оформление</legend>
+          <label for="theme-preference">Тема</label>
+          <select id="theme-preference">
+            <option value="system">Системная</option>
+            <option value="latte">Latte</option>
+            <option value="macchiato">Macchiato</option>
+          </select>
+          <p id="theme-status" role="status" aria-live="polite"></p>
+        </fieldset>
       </section>
     </main>
   </body>

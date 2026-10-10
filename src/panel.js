@@ -1,3 +1,4 @@
+import "./theme.js";
 import { updateCards } from "./cards.js";
 
 const DEFAULT_SETTINGS = {

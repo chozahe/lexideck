@@ -80,15 +80,15 @@ test("поиск находит основную форму и значение,
 
 test("карточка, сохранённая в панели, появляется в открытом словаре", async ({ page }) => {
   await page.goto("/src/settings.html");
-  await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
+  await page.locator("#api-url").fill(new URL("/v1", page.url()).href);
   await page.locator("#model").fill("controlled-model");
   await page.locator("#api-key").fill("test-secret");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
-  await expect(page.getByRole("status")).toContainText("Настройки сохранены");
+  await expect(page.locator("#settings-status")).toContainText("Настройки сохранены");
 
   await page.goto("/src/panel.html");
   await page.locator("#source-text").fill("She took off her coat and wore her coat.");
-  await page.getByRole("button", { name: "Перевести" }).click();
+  await page.locator("#translate").click();
   await expect(page.locator("#word-meanings li")).toHaveCount(3);
 
   const [vocabulary] = await Promise.all([

@@ -1,3 +1,5 @@
+import "./theme.js";
+
 const DEFAULT_SETTINGS = {
   sourceLanguage: "English",
   targetLanguage: "Русский",

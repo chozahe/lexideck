@@ -1,3 +1,4 @@
+import "./theme.js";
 import { createBackup, parseBackup, restoreBackup } from "./backup.js";
 
 const $ = (id) => document.getElementById(id);
