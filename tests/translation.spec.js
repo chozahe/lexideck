@@ -134,7 +134,7 @@ test("пользователь получает перевод и значени
   expect(call.body.messages[1].content).toBe("She took off her coat and wore her coat.");
 });
 
-test("пользователь сохраняет значения слова в одну локальную карточку и открывает её после перезапуска панели", async ({ page }) => {
+test("пользователь сохраняет значения слова в одну локальную карточку и открывает её после перезагрузки словаря", async ({ page }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
   await page.getByRole("button", { name: "Перевести" }).click();
@@ -142,14 +142,18 @@ test("пользователь сохраняет значения слова в
   const coatRows = page.locator("#word-meanings li").filter({ hasText: "coat —" });
   await coatRows.nth(0).getByRole("button", { name: "Сохранить" }).click();
   await coatRows.nth(1).getByRole("button", { name: "Сохранить" }).click();
+  await expect(coatRows.getByRole("button", { name: "Сохранено", exact: true })).toHaveCount(2);
 
-  await expect(page.locator("#vocabulary-cards article")).toHaveCount(1);
+  await page.goto("/src/vocabulary.html");
+  await expect(page.locator("#vocabulary-cards details")).toHaveCount(1);
+  await page.locator("#vocabulary-cards summary").click();
   await expect(page.locator("#vocabulary-cards")).toContainText("coat");
   await expect(page.locator("#vocabulary-cards")).toContainText("пальто, которое она сняла");
   await expect(page.locator("#vocabulary-cards")).toContainText("пальто, которое она надела");
 
   await page.reload();
-  await expect(page.locator("#vocabulary-cards article")).toHaveCount(1);
+  await expect(page.locator("#vocabulary-cards details")).toHaveCount(1);
+  await page.locator("#vocabulary-cards summary").click();
   await expect(page.locator("#vocabulary-cards")).toContainText("took off");
 });
 
@@ -157,12 +161,16 @@ test("пользователь сохраняет словоформу под о
   await page.goto("/src/panel.html");
   await configureApi(page);
   await page.getByRole("button", { name: "Перевести" }).click();
+  await expect(page.locator("#word-meanings li")).toHaveCount(3);
   await page.locator("#source-text").fill("Edited after translation");
   const phrasalVerb = page.locator("#word-meanings li").filter({ hasText: "took off —" });
   await phrasalVerb.getByRole("button", { name: "Сохранить" }).click();
+  await expect(phrasalVerb.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();
 
-  const card = page.locator("#vocabulary-cards article");
-  await expect(card.locator("h3")).toHaveText("take off");
+  await page.goto("/src/vocabulary.html");
+  const card = page.locator("#vocabulary-cards details");
+  await expect(card.locator("summary strong")).toHaveText("take off");
+  await card.locator("summary").click();
   await expect(card).toContainText("took off: She took off her coat and wore her coat.");
   await expect(card).toContainText("She took off her shoes.");
 });
@@ -178,9 +186,12 @@ test("пользователь сохраняет выделенное усто�
   await page.getByRole("button", { name: "Сохранить выделенное выражение" }).click();
   await page.locator("#expression-meaning").fill("раскрыть секрет");
   await page.getByRole("button", { name: "Сохранить выражение" }).click();
+  await expect(page.getByRole("button", { name: "Выражение сохранено", exact: true })).toBeVisible();
 
-  const expression = page.locator("#vocabulary-cards article");
+  await page.goto("/src/vocabulary.html");
+  const expression = page.locator("#vocabulary-cards details");
   await expect(expression).toHaveCount(1);
+  await expression.locator("summary").click();
   await expect(expression).toContainText("let the cat out of the bag");
   await expect(expression).toContainText("раскрыть секрет");
   await expect(expression).toContainText("She finally let the cat out of the bag.");

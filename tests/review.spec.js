@@ -105,18 +105,21 @@ async function saveTranslatedWords(page) {
   await page.goto("/src/panel.html");
   await page.locator("#source-text").fill("She took off her coat and wore her coat.");
   await page.locator("#translate").click();
+  await expect(page.locator("#word-meanings li")).toHaveCount(3);
   for (const row of await page.locator("#word-meanings li").all()) {
     await row.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(row.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();
   }
-  await expect(page.locator("#vocabulary-cards")).toContainText("take off");
-  await expect(page.locator("#vocabulary-cards")).toContainText("coat");
+  await page.goto("/src/vocabulary.html");
+  await expect(page.locator("#vocabulary-cards summary")).toContainText(["take off", "coat"]);
+
   await page.goto("/src/review.html");
 }
 
 async function readCardDue(page, headword) {
-  await page.goto("/src/panel.html");
-  const card = page.locator("#vocabulary-cards article").filter({ has: page.getByRole("heading", { name: headword, exact: true }) });
+  await page.goto("/src/vocabulary.html");
+  const card = page.locator("#vocabulary-cards details").filter({ has: page.locator("summary strong", { hasText: headword }) });
+  await expect(card.locator("summary")).toBeVisible();
   const due = await card.locator("time").getAttribute("datetime");
   await page.goto("/src/review.html");
   return due;
@@ -190,4 +193,90 @@ test("оценка устаревшей карточки во второй вк�
   await expect(other.locator("#review-status")).toContainText("Карточка уже изменилась");
   await page.reload();
   expect(await readCardDue(page, "take off")).toBe(due);
+});
+
+function concurrentReviewCards() {
+  return ["a", "b", "c"].map((headword) => ({
+    id: `concurrent-${headword}`, kind: "word", headword,
+    meanings: [{ text: `значение ${headword}`, contexts: [{ form: headword, text: `Context ${headword}.` }], examples: [`Example ${headword}.`] }],
+    schedule: {
+      due: `2026-10-09T12:${headword === "a" ? "01" : "00"}:00.000Z`,
+      stability: 2.5, difficulty: 4.2, elapsed_days: 1, scheduled_days: 2,
+      reps: 1, lapses: 0, state: 2, last_review: "2026-10-08T12:00:00.000Z"
+    },
+    firstReviewedAt: "2026-10-01T12:00:00.000Z", nextMeaning: 0, reviewHistory: []
+  }));
+}
+
+async function importConcurrentCards(page, cards = concurrentReviewCards()) {
+  await page.goto("/src/vocabulary.html");
+  const backup = { format: "lexideck-backup", version: 1, exportedAt: "2026-10-09T12:00:00.000Z", cards };
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#import-backup").setInputFiles({ name: "concurrent.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(backup)) });
+  await expect(page.locator("#backup-status")).toHaveText("Восстановлено карточек: 3.");
+}
+
+async function rateVisibleCard(page, headword) {
+  await expect(page.locator("#review-headword")).toHaveText(headword);
+  await page.getByRole("button", { name: "Показать ответ" }).click();
+  await page.getByRole("button", { name: "Легко", exact: true }).click();
+}
+
+async function exportedCards(page) {
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Скачать резервную копию" }).click();
+  const file = await (await download).path();
+  return JSON.parse(await require("node:fs/promises").readFile(file, "utf8")).cards;
+}
+
+test("очередь пропускает карточки, чей срок другая вкладка перенесла в будущее", async ({ page, context }) => {
+  const now = new Date("2026-10-09T12:00:00Z");
+  await page.clock.install({ time: now });
+  await importConcurrentCards(page);
+  const other = await context.newPage();
+  await other.clock.install({ time: now });
+  await other.goto("/src/review.html");
+  await other.getByRole("button", { name: "Начать занятие" }).click();
+  await expect(other.locator("#review-progress")).toHaveText("Пройдено 0 из 2. Осталось 2.");
+  await page.clock.setSystemTime(new Date("2026-10-09T12:01:00Z"));
+  await other.clock.setSystemTime(new Date("2026-10-09T12:01:00Z"));
+  await page.goto("/src/review.html");
+  await page.getByRole("button", { name: "Начать занятие" }).click();
+  await expect(page.locator("#review-progress")).toHaveText("Пройдено 0 из 3. Осталось 3.");
+  await rateVisibleCard(other, "b");
+  await expect(other.locator("#review-headword")).toHaveText("c");
+  await rateVisibleCard(other, "c");
+  await expect(other.locator("#review-card")).toBeHidden();
+  await rateVisibleCard(page, "a");
+  await expect(page.locator("#review-card")).toBeHidden();
+  await expect(page.locator("#review-progress")).toHaveText("Пройдено 1 из 1. Осталось 0.");
+  await expect(page.locator("#review-status")).toContainText("Занятие завершено");
+  await page.goto("/src/vocabulary.html");
+  const cards = await exportedCards(page);
+  for (const card of cards) {
+    expect(card.schedule.reps).toBe(2);
+    expect(card.reviewHistory).toHaveLength(1);
+    expect(new Date(card.schedule.due).getTime()).toBeGreaterThan(new Date("2026-10-09T12:01:00Z").getTime());
+  }
+});
+
+test("оценка после переноса срока в другой вкладке пропускает карточку без второго ответа", async ({ page, context }) => {
+  const now = new Date("2026-10-09T12:00:00Z");
+  await page.clock.install({ time: now });
+  await importConcurrentCards(page);
+  await page.goto("/src/review.html");
+  await page.getByRole("button", { name: "Начать занятие" }).click();
+  await expect(page.locator("#review-headword")).toHaveText("b");
+  await page.getByRole("button", { name: "Показать ответ" }).click();
+  const vocabulary = await context.newPage();
+  const cards = concurrentReviewCards();
+  // Импорт изменяет due при прежнем reps: одного сравнения версии недостаточно.
+  cards.find((card) => card.headword === "b").schedule.due = "2026-10-17T12:00:00.000Z";
+  await importConcurrentCards(vocabulary, cards);
+  const before = (await exportedCards(vocabulary)).find((card) => card.headword === "b");
+  await page.getByRole("button", { name: "Не вспомнил", exact: true }).click();
+  await expect(page.locator("#review-headword")).toHaveText("c");
+  await expect(page.locator("#review-progress")).toHaveText("Пройдено 0 из 1. Осталось 1.");
+  const after = (await exportedCards(vocabulary)).find((card) => card.headword === "b");
+  expect(after).toEqual(before);
 });

@@ -9,9 +9,11 @@ test("системная тема следует за режимом брауз�
   await page.goto("/src/settings.html");
   await expect(page.locator("#theme-preference")).toHaveValue("system");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "latte");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(239, 241, 245)");
 
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "macchiato");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(36, 39, 58)");
   await expect(page.locator("#theme-preference")).toHaveValue("system");
 });
 
@@ -21,10 +23,12 @@ test("выбор Latte или Macchiato сохраняется и обновля
   const preference = page.locator("#theme-preference");
   await expect(preference).toHaveValue("system");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "macchiato");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(36, 39, 58)");
 
   await preference.selectOption("latte");
   await expect(page.locator("#theme-status")).toHaveText("Тема сохранена для панели и страниц.");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "latte");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(239, 241, 245)");
 
   const pages = [];
   for (const path of ["panel.html", "review.html", "vocabulary.html"]) {
@@ -36,15 +40,18 @@ test("выбор Latte или Macchiato сохраняется и обновля
 
   await preference.selectOption("macchiato");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "macchiato");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(36, 39, 58)");
   for (const surface of pages) {
     await expect(surface.locator("html")).toHaveAttribute("data-theme", "macchiato");
   }
 
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "macchiato");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(36, 39, 58)");
   await page.reload();
   await expect(page.locator("#theme-preference")).toHaveValue("macchiato");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "macchiato");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(36, 39, 58)");
   for (const surface of pages) await surface.close();
 });
 
@@ -93,4 +100,22 @@ test("основные действия разделов доступны с к�
   await page.keyboard.press("ArrowDown");
   await expect(preference).toHaveValue("latte");
   await expect(page.locator("#theme-status")).toContainText("Тема сохранена");
+});
+
+test("системная палитра видна до JavaScript без вспышки противоположной темы", async ({ browser }) => {
+  for (const [colorScheme, background, text] of [
+    ["light", "rgb(239, 241, 245)", "rgb(76, 79, 105)"],
+    ["dark", "rgb(36, 39, 58)", "rgb(202, 211, 245)"]
+  ]) {
+    const context = await browser.newContext({ javaScriptEnabled: false, colorScheme });
+    try {
+      const page = await context.newPage();
+      await page.goto("http://127.0.0.1:4173/src/panel.html");
+      await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.+/);
+      await expect(page.locator("body")).toHaveCSS("background-color", background);
+      await expect(page.locator("body")).toHaveCSS("color", text);
+    } finally {
+      await context.close();
+    }
+  }
 });

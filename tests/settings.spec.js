@@ -13,7 +13,7 @@ test("настройки сохраняются после перезагруз�
   await page.locator("#api-key").fill("settings-secret");
   await page.locator("#new-card-limit").fill("4");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
-  await expect(page.getByRole("status")).toHaveText("Настройки сохранены на этом устройстве.");
+  await expect(page.locator("#settings-status")).toHaveText("Настройки сохранены на этом устройстве.");
 
   await page.reload();
   await expect(page.locator("#source-language")).toHaveValue("Spanish");

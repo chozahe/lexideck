@@ -1,12 +1,5 @@
 import "./theme.js";
-
-const DEFAULT_SETTINGS = {
-  sourceLanguage: "English",
-  targetLanguage: "Русский",
-  apiUrl: "",
-  model: "",
-  apiKey: ""
-};
+import { DEFAULT_SETTINGS } from "./settings.js";
 
 const $ = (id) => document.getElementById(id);
 const form = $("settings-form");
