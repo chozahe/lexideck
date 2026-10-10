@@ -4,9 +4,21 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("панель открывает отдельную вкладку сразу в разделе повторения", async ({ page }) => {
+  await page.goto("/src/panel.html");
+  const [reviewTab] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.getByRole("link", { name: "Перейти к повторению" }).click()
+  ]);
+  await expect(reviewTab).toHaveURL(/\/src\/review\.html$/);
+  await expect(reviewTab.getByRole("heading", { name: "Повторение", exact: true })).toBeVisible();
+  await expect(reviewTab.getByRole("link", { name: "Повторение" })).toHaveAttribute("aria-current", "page");
+  await expect(reviewTab.getByRole("button", { name: "Начать занятие" })).toBeVisible();
+});
+
 test("оценка карточки обновляет серию и достижения, а пропуск дня сбрасывает серию", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00") });
-  await page.goto("/src/panel.html");
+  await page.goto("/src/review.html");
   await page.evaluate(async () => {
     await chrome.storage.local.set({
       cards: [{
@@ -42,7 +54,7 @@ test("оценка карточки обновляет серию и дости�
 
 test("дневной лимит новых карточек равен 10, меняется и сохраняется между занятиями", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
-  await page.goto("/src/panel.html");
+  await page.goto("/src/review.html");
   // Начальные данные локального хранилища: словарь из 12 новых карточек.
   await page.evaluate(async () => {
     await chrome.storage.local.set({ cards: Array.from({ length: 12 }, (_, index) => ({
@@ -89,6 +101,17 @@ async function saveTranslatedWords(page) {
     await row.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(row.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();
   }
+  await expect(page.locator("#vocabulary-cards")).toContainText("take off");
+  await expect(page.locator("#vocabulary-cards")).toContainText("coat");
+  await page.goto("/src/review.html");
+}
+
+async function readCardDue(page, headword) {
+  await page.goto("/src/panel.html");
+  const card = page.locator("#vocabulary-cards article").filter({ has: page.getByRole("heading", { name: headword, exact: true }) });
+  const due = await card.locator("time").getAttribute("datetime");
+  await page.goto("/src/review.html");
+  return due;
 }
 
 test("значения карточки чередуются с общим расписанием, повторение доступно при нулевом лимите", async ({ page }) => {
@@ -103,9 +126,7 @@ test("значения карточки чередуются с общим ра�
   await expect(page.locator("#review-meaning")).toHaveText("пальто, которое она сняла");
   await expect(review).not.toContainText("пальто, которое она надела");
   await review.getByRole("button", { name: "Не вспомнил", exact: true }).click();
-  const coat = page.locator("#vocabulary-cards article").filter({ has: page.getByRole("heading", { name: "coat", exact: true }) });
-  const due = await coat.locator("time").getAttribute("datetime");
-  await expect(coat.locator("time")).toHaveCount(1);
+  const due = await readCardDue(page, "coat");
   await expect(page.locator("#review-card")).toBeHidden();
   await page.getByLabel("Новых карточек в день").fill("0");
   await page.getByRole("button", { name: "Сохранить лимит" }).click();
@@ -117,7 +138,8 @@ test("значения карточки чередуются с общим ра�
   await expect(page.locator("#review-meaning")).toHaveText("пальто, которое она надела");
   await expect(review).not.toContainText("пальто, которое она сняла");
   await review.getByRole("button", { name: "Трудно", exact: true }).click();
-  await expect(coat.locator("time")).not.toHaveAttribute("datetime", due);
+  const updatedDue = await readCardDue(page, "coat");
+  expect(updatedDue).not.toBe(due);
 });
 
 test("карточка из словаря получает срок FSRS после показа ответа и оценки", async ({ page }) => {
@@ -133,11 +155,10 @@ test("карточка из словаря получает срок FSRS пос
   await expect(review).toContainText("took off: She took off her coat and wore her coat.");
   await expect(review).toContainText("She took off her shoes.");
   await review.getByRole("button", { name: "Хорошо", exact: true }).click();
-  const card = page.locator("#vocabulary-cards article").filter({ has: page.getByRole("heading", { name: "take off", exact: true }) });
-  const due = await card.locator("time").getAttribute("datetime");
+  const due = await readCardDue(page, "take off");
   expect(new Date(due).getTime()).toBeGreaterThan(new Date("2026-10-09T12:00:00Z").getTime());
   await page.reload();
-  await expect(card.locator("time")).toHaveAttribute("datetime", due);
+  expect(await readCardDue(page, "take off")).toBe(due);
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(review.getByRole("heading", { name: "coat", exact: true })).toBeVisible();
   await page.clock.setSystemTime(new Date(due));
@@ -145,19 +166,18 @@ test("карточка из словаря получает срок FSRS пос
   await expect(review.getByRole("heading", { name: "take off", exact: true })).toBeVisible();
 });
 
-test("оценка устаревшей карточки во второй панели не меняет её расписание", async ({ page, context }) => {
+test("оценка устаревшей карточки во второй вкладке не меняет её расписание", async ({ page, context }) => {
   await saveTranslatedWords(page);
   const other = await context.newPage();
-  await other.goto("/src/panel.html");
-  for (const panel of [page, other]) {
-    await panel.getByRole("button", { name: "Начать занятие" }).click();
-    await panel.getByRole("button", { name: "Показать ответ" }).click();
+  await other.goto("/src/review.html");
+  for (const tab of [page, other]) {
+    await tab.getByRole("button", { name: "Начать занятие" }).click();
+    await tab.getByRole("button", { name: "Показать ответ" }).click();
   }
   await page.getByRole("button", { name: "Легко", exact: true }).click();
-  const card = page.locator("#vocabulary-cards article").filter({ has: page.getByRole("heading", { name: "take off", exact: true }) });
-  const due = await card.locator("time").getAttribute("datetime");
+  const due = await readCardDue(page, "take off");
   await other.getByRole("button", { name: "Не вспомнил", exact: true }).click();
   await expect(other.locator("#review-status")).toContainText("Карточка уже изменилась");
   await page.reload();
-  await expect(card.locator("time")).toHaveAttribute("datetime", due);
+  expect(await readCardDue(page, "take off")).toBe(due);
 });

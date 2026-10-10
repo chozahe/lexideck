@@ -11,7 +11,10 @@
     <main>
       <header>
         <h1>Lexideck</h1>
-        <button id="settings-toggle" class="subtle" type="button" aria-expanded="false">Настройки API</button>
+        <nav aria-label="Основная навигация">
+          <a href="review.html" target="_blank" rel="noopener">Перейти к повторению</a>
+          <button id="settings-toggle" class="subtle" type="button" aria-expanded="false">Настройки API</button>
+        </nav>
       </header>
 
       <section id="settings" hidden>
@@ -46,36 +49,6 @@
         <p id="sentence-translation"></p>
         <h2>Слова по порядку</h2>
         <ol id="word-meanings"></ol>
-      </section>
-      <section id="review" aria-labelledby="review-heading">
-        <h2 id="review-heading">Повторение</h2>
-        <form id="review-settings">
-          <label>Новых карточек в день<input id="new-card-limit" type="number" min="0" step="1" value="10" required></label>
-          <button type="submit">Сохранить лимит</button>
-        </form>
-        <p id="review-settings-status" role="status"></p>
-        <p id="study-streak" aria-live="polite">Серия занятий: 0 дней</p>
-        <h3>Достижения</h3>
-        <ul id="study-achievements" aria-live="polite"></ul>
-        <button id="start-review" type="button">Начать занятие</button>
-        <p id="review-status" role="status"></p>
-        <article id="review-card" hidden>
-          <h3 id="review-headword"></h3>
-          <button id="show-answer" type="button">Показать ответ</button>
-          <div id="review-answer" hidden>
-            <p id="review-meaning"></p>
-            <h4>Контекст употребления</h4>
-            <ul id="review-contexts"></ul>
-            <h4>Примеры модели</h4>
-            <ul id="review-examples"></ul>
-            <div id="review-ratings">
-              <button type="button" data-rating="1">Не вспомнил</button>
-              <button type="button" data-rating="2">Трудно</button>
-              <button type="button" data-rating="3">Хорошо</button>
-              <button type="button" data-rating="4">Легко</button>
-            </div>
-          </div>
-        </article>
       </section>
       <section id="vocabulary">
         <h2>Словарь</h2>

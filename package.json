@@ -4,7 +4,7 @@
   "description": "Локальное расширение для перевода выделенного текста",
   "scripts": {
     "test": "playwright test",
-    "typecheck": "node -e \"JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))\" && node --check src/background.js && node --check src/content.js && node --input-type=module --check < src/panel.js && node --input-type=module --check < src/review.js && node --input-type=module --check < src/study.js && node --input-type=module --check < src/cards.js && node --input-type=module --check < src/backup.js && node --check tests/server.js && node --check tests/translation.spec.js && node --check tests/extension-events.spec.js && node --check scripts/build.js && node --check playwright.config.js && node --check tests/review.spec.js && node --check tests/backup.spec.js && node --check scripts/prepare-vendor.js",
+    "typecheck": "node -e \"JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))\" && node --check src/background.js && node --check src/content.js && node --input-type=module --check < src/panel.js && node --input-type=module --check < src/review.js && node --input-type=module --check < src/review-page.js && node --input-type=module --check < src/study.js && node --input-type=module --check < src/cards.js && node --input-type=module --check < src/backup.js && node --check tests/server.js && node --check tests/translation.spec.js && node --check tests/extension-events.spec.js && node --check scripts/build.js && node --check playwright.config.js && node --check tests/review.spec.js && node --check tests/backup.spec.js && node --check scripts/prepare-vendor.js",
     "build": "node scripts/build.js"
   },
   "repository": {
