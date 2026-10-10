@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lexideck — настройки</title>
+    <link rel="stylesheet" href="panel.css">
+    <script type="module" src="settings-page.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Lexideck</h1>
+        <nav aria-label="Основная навигация">
+          <a href="review.html">Повторение</a>
+          <a href="vocabulary.html">Словарь</a>
+          <a href="settings.html" aria-current="page">Настройки</a>
+        </nav>
+      </header>
+      <section aria-labelledby="settings-heading">
+        <h2 id="settings-heading">Настройки</h2>
+        <form id="settings-form">
+          <label for="source-language">Исходный язык</label>
+          <input id="source-language" name="sourceLanguage" value="English" autocomplete="off" required>
+          <label for="target-language">Язык перевода</label>
+          <input id="target-language" name="targetLanguage" value="Русский" autocomplete="off" required>
+          <label for="api-url">URL API</label>
+          <input id="api-url" name="apiUrl" type="url" placeholder="https://api.example.com/v1" autocomplete="url">
+          <label for="model">Идентификатор модели</label>
+          <input id="model" name="model" autocomplete="off" placeholder="gpt-4o-mini">
+          <label for="api-key">Ключ API</label>
+          <input id="api-key" name="apiKey" type="password" autocomplete="off">
+          <label for="new-card-limit">Новых карточек в день</label>
+          <input id="new-card-limit" name="newCardLimit" type="number" min="0" step="1" value="10" required>
+          <button type="submit">Сохранить настройки</button>
+        </form>
+        <p id="settings-status" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+  </body>
+</html>

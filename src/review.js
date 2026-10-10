@@ -55,24 +55,6 @@ function showAnswer() {
 export function setupReview(onReview = async () => {}) {
   if (!$("review")) return;
   void renderStudyStats();
-  void dailyLimit().then((limit) => { $("new-card-limit").value = limit; }).catch((error) => {
-    $("review-settings-status").textContent = `Не удалось загрузить лимит: ${error.message}`;
-  });
-  $("review-settings").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const limit = Number($("new-card-limit").value);
-    if (!Number.isSafeInteger(limit) || limit < 0) {
-      $("review-settings-status").textContent = "Укажите целое неотрицательное число.";
-      return;
-    }
-    try {
-      await chrome.storage.local.set({ newCardLimit: limit });
-      $("review-settings-status").textContent = "Лимит сохранён.";
-      if (!saving) await nextCard();
-    } catch (error) {
-      $("review-settings-status").textContent = `Не удалось сохранить лимит: ${error.message}`;
-    }
-  });
   $("start-review").addEventListener("click", () => {
     void nextCard().catch((error) => { $("review-status").textContent = error.message; });
   });
