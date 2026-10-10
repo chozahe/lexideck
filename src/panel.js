@@ -11,14 +11,6 @@ const DEFAULT_SETTINGS = {
 };
 
 const $ = (id) => document.getElementById(id);
-const form = {
-  sourceLanguage: $("source-language"),
-  targetLanguage: $("target-language"),
-  apiUrl: $("api-url"),
-  model: $("model"),
-  apiKey: $("api-key")
-};
-
 function showError(message) {
   $("error").textContent = message;
 }
@@ -40,17 +32,6 @@ async function importBackup(file) {
   await restoreBackup(cards, () => window.confirm(`В резервной копии ${cards.length} карточек. Заменить текущий словарь?`));
   await renderCards();
   $("backup-status").textContent = `Восстановлено карточек: ${cards.length}.`;
-}
-
-async function loadSettings() {
-  const saved = await currentSettings();
-  Object.entries(form).forEach(([key, input]) => { input.value = saved[key]; });
-}
-
-async function saveSettings() {
-  const settings = Object.fromEntries(Object.entries(form).map(([key, input]) => [key, input.value.trim()]));
-  await chrome.storage.local.set({ settings });
-  $("settings-status").textContent = "Настройки сохранены на этом устройстве.";
 }
 
 async function apiCompletion(messages, config) {
@@ -385,21 +366,6 @@ async function runTranslation() {
   }
 }
 
-$("settings-toggle").addEventListener("click", () => {
-  const settings = $("settings");
-  settings.hidden = !settings.hidden;
-  $("settings-toggle").setAttribute("aria-expanded", String(!settings.hidden));
-});
-  $("save-settings").addEventListener("click", async () => {
-    $("settings-status").textContent = "";
-    $("settings-status").style.color = "";
-  try {
-    await saveSettings();
-  } catch (error) {
-    $("settings-status").textContent = `Не удалось сохранить настройки: ${error.message}`;
-    $("settings-status").style.color = "#c33";
-  }
-});
 $("translate").addEventListener("click", () => void runTranslation());
 $("export-backup").addEventListener("click", () => {
   void exportBackup().catch((error) => { $("backup-status").textContent = `Не удалось экспортировать словарь: ${error.message}`; });
@@ -451,7 +417,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 setupReview(renderCards);
 
-void loadSettings().then(async () => {
+void (async () => {
   await renderCards();
   const { pendingSelection } = await chrome.storage.local.get("pendingSelection");
   if (pendingSelection) {
@@ -461,4 +427,4 @@ void loadSettings().then(async () => {
   }
   const comicState = await chrome.storage.session.get(["pendingComicImage", "pendingComicError"]);
   await consumePendingComic(comicState);
-}).catch((error) => showError(`Не удалось загрузить настройки: ${error.message}`));
+})().catch((error) => showError(`Не удалось загрузить панель: ${error.message}`));

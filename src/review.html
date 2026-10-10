@@ -13,17 +13,12 @@
         <h1>Lexideck</h1>
         <nav aria-label="Основная навигация">
           <a href="review.html" aria-current="page">Повторение</a>
-          <span aria-disabled="true">Словарь (скоро)</span>
-          <span aria-disabled="true">Настройки (скоро)</span>
+          <a href="vocabulary.html">Словарь</a>
+          <a href="settings.html">Настройки</a>
         </nav>
       </header>
       <section id="review" aria-labelledby="review-heading">
         <h2 id="review-heading">Повторение</h2>
-        <form id="review-settings">
-          <label>Новых карточек в день<input id="new-card-limit" type="number" min="0" step="1" value="10" required></label>
-          <button type="submit">Сохранить лимит</button>
-        </form>
-        <p id="review-settings-status" role="status"></p>
         <p id="study-streak" aria-live="polite">Серия занятий: 0 дней</p>
         <h3>Достижения</h3>
         <ul id="study-achievements" aria-live="polite"></ul>

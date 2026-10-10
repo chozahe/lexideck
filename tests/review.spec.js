@@ -54,6 +54,8 @@ test("оценка карточки обновляет серию и дости�
 
 test("дневной лимит новых карточек равен 10, меняется и сохраняется между занятиями", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
+  await page.goto("/src/settings.html");
+  await expect(page.getByLabel("Новых карточек в день")).toHaveValue("10");
   await page.goto("/src/review.html");
   // Начальные данные локального хранилища: словарь из 12 новых карточек.
   await page.evaluate(async () => {
@@ -63,7 +65,6 @@ test("дневной лимит новых карточек равен 10, ме�
     })) });
   });
   await page.reload();
-  await expect(page.getByLabel("Новых карточек в день")).toHaveValue("10");
   await page.getByRole("button", { name: "Начать занятие" }).click();
   const review = page.locator("#review");
   for (let index = 1; index <= 10; index++) {
@@ -75,27 +76,34 @@ test("дневной лимит новых карточек равен 10, ме�
   await page.reload();
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(page.locator("#review-card")).toBeHidden();
+  await page.goto("/src/settings.html");
   await page.getByLabel("Новых карточек в день").fill("11");
-  await page.getByRole("button", { name: "Сохранить лимит" }).click();
+  await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await expect(page.getByText("Настройки сохранены на этом устройстве.")).toBeVisible();
+  await page.goto("/src/review.html");
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(review.getByRole("heading", { name: "word 11", exact: true })).toBeVisible();
   await review.getByRole("button", { name: "Показать ответ" }).click();
   await review.getByRole("button", { name: "Легко", exact: true }).click();
   await expect(page.locator("#review-card")).toBeHidden();
   await page.reload();
+  await page.goto("/src/settings.html");
   await expect(page.getByLabel("Новых карточек в день")).toHaveValue("11");
+  await page.goto("/src/review.html");
   await page.clock.setSystemTime(new Date("2026-10-10T12:00:00Z"));
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(review.getByRole("heading", { name: "word 12", exact: true })).toBeVisible();
 });
 
 async function saveTranslatedWords(page) {
-  await page.goto("/src/panel.html");
-  await page.getByRole("button", { name: "Настройки API" }).click();
+  await page.goto("/src/settings.html");
   await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
   await page.locator("#model").fill("controlled-model");
   await page.locator("#api-key").fill("test-secret");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await page.evaluate(() => chrome.storage.local.remove("pendingSelection"));
+  await page.goto("/src/panel.html");
+  await page.locator("#source-text").fill("She took off her coat and wore her coat.");
   await page.getByRole("button", { name: "Подтвердить текст и перевести" }).click();
   for (const row of await page.locator("#word-meanings li").all()) {
     await row.getByRole("button", { name: "Сохранить", exact: true }).click();
@@ -128,8 +136,10 @@ test("значения карточки чередуются с общим ра�
   await review.getByRole("button", { name: "Не вспомнил", exact: true }).click();
   const due = await readCardDue(page, "coat");
   await expect(page.locator("#review-card")).toBeHidden();
+  await page.goto("/src/settings.html");
   await page.getByLabel("Новых карточек в день").fill("0");
-  await page.getByRole("button", { name: "Сохранить лимит" }).click();
+  await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await page.goto("/src/review.html");
   await page.reload();
   await page.clock.setSystemTime(new Date(due));
   await page.getByRole("button", { name: "Начать занятие" }).click();

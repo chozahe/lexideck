@@ -29,7 +29,11 @@ const server = http.createServer((request, response) => {
         window.__chromeValues = values;
         window.chrome = { storage: {
           local: {
-            get: async (key) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}")); return structuredClone({ [key]: values[key] }); },
+            get: async (key) => {
+              Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"));
+              const keys = Array.isArray(key) ? key : [key];
+              return structuredClone(Object.fromEntries(keys.map((item) => [item, values[item]])));
+            },
             set: async (next) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"), structuredClone(next)); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
             remove: async (key) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}")); delete values[key]; localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); }
           },
@@ -100,6 +104,7 @@ const server = http.createServer((request, response) => {
     if (filePath.endsWith(".html")) {
       html = contents.toString().replace('<script type="module" src="panel.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="panel.js"></script>');
       html = html.replace('<script type="module" src="review-page.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="review-page.js"></script>');
+      html = html.replace('<script type="module" src="settings-page.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="settings-page.js"></script>');
     }
     response.writeHead(200, { "Content-Type": `${mime}; charset=utf-8` }).end(html);
   });

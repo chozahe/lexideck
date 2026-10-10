@@ -1,11 +1,14 @@
 const { test, expect } = require("@playwright/test");
 
 async function configureApi(page) {
-  await page.getByRole("button", { name: "Настройки API" }).click();
+  await page.goto("/src/settings.html");
   await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
   await page.locator("#model").fill("controlled-model");
   await page.locator("#api-key").fill("test-secret");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await expect(page.getByText("Настройки сохранены на этом устройстве.")).toBeVisible();
+  await page.goto("/src/panel.html");
+  await page.locator("#source-text").fill("She took off her coat and wore her coat.");
 }
 
 async function selectComicRegion(page) {
@@ -111,7 +114,6 @@ test.beforeEach(async ({ request }) => {
 test("пользователь получает перевод и значения слов по порядку через API", async ({ page, request }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
-  await expect(page.getByText("Настройки сохранены на этом устройстве.")).toBeVisible();
   await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
 
   await page.getByRole("button", { name: "Перевести" }).click();
@@ -205,7 +207,7 @@ test("область комикса распознаётся vision-модель
   await expect(page.locator("#source-text")).toHaveValue("She took of her coat and wore her coat.");
   await expect(page.locator("#comic-status")).toContainText("исправьте реплики");
   await page.locator("#source-text").fill("She took off her coat and wore her coat.");
-  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await page.locator("#translate").click();
 
   await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
   const calls = await (await request.get("/__test/requests")).json();
