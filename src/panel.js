@@ -364,19 +364,24 @@ function renderResult(result, sourceText) {
   $("result").hidden = false;
 }
 
+let translationRequest = 0;
+
 async function runTranslation() {
   const text = $("source-text").value.trim();
   if (!text) return showError("Введите текст или выберите его на странице.");
+  const request = ++translationRequest;
   showError("");
-  $("translate").disabled = true;
+  $("result").hidden = true;
+  $("expression-form").hidden = true;
   $("translate").textContent = "Переводим…";
   try {
-    renderResult(await translate(text), text);
+    const result = await translate(text);
+    if (request !== translationRequest) return;
+    renderResult(result, text);
   } catch (error) {
-    showError(error.message || "Не удалось выполнить перевод.");
+    if (request === translationRequest) showError(error.message || "Не удалось выполнить перевод.");
   } finally {
-    $("translate").disabled = false;
-    $("translate").textContent = "Подтвердить текст и перевести";
+    if (request === translationRequest) $("translate").textContent = "Перевести";
   }
 }
 
@@ -434,6 +439,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.pendingSelection?.newValue) {
     $("source-text").value = changes.pendingSelection.newValue;
     void chrome.storage.local.remove("pendingSelection");
+    void runTranslation();
   }
   if (areaName === "session") {
     void consumePendingComic({
@@ -451,6 +457,7 @@ void loadSettings().then(async () => {
   if (pendingSelection) {
     $("source-text").value = pendingSelection;
     await chrome.storage.local.remove("pendingSelection");
+    void runTranslation();
   }
   const comicState = await chrome.storage.session.get(["pendingComicImage", "pendingComicError"]);
   await consumePendingComic(comicState);
