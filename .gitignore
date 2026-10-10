@@ -114,3 +114,5 @@ playwright-report/
 
 # TernJS port file
 .tern-port
+/dist.crx
+/dist.pem
