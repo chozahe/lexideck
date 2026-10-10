@@ -1,13 +1,6 @@
 import "./theme.js";
+import { DEFAULT_SETTINGS } from "./settings.js";
 import { updateCards } from "./cards.js";
-
-const DEFAULT_SETTINGS = {
-  sourceLanguage: "English",
-  targetLanguage: "Русский",
-  apiUrl: "",
-  model: "",
-  apiKey: ""
-};
 
 const $ = (id) => document.getElementById(id);
 function showError(message) {

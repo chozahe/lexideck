@@ -23,6 +23,10 @@ function introducedOn(cards, now) {
   return cards.filter((card) => card.firstReviewedAt && localDay(new Date(card.firstReviewedAt)) === localDay(now)).length;
 }
 
+function isDue(card, now) {
+  return card.schedule && new Date(card.schedule.due) <= now;
+}
+
 function renderProgress() {
   const progress = $("review-progress");
   const bar = $("review-progress-bar");
@@ -45,7 +49,7 @@ async function startSession() {
   const now = new Date();
   const limit = await dailyLimit();
   const introducedToday = introducedOn(cards, now);
-  const dueCards = cards.filter((card) => card.schedule && new Date(card.schedule.due) <= now);
+  const dueCards = cards.filter((card) => isDue(card, now));
   const newCards = introducedToday < limit
     ? cards.filter((card) => !card.schedule).slice(0, limit - introducedToday)
     : [];
@@ -64,7 +68,18 @@ async function nextCard() {
     return;
   }
   const { cards = [] } = await chrome.storage.local.get("cards");
-  currentCard = cards.find((card) => card.id === sessionQueue[sessionCompleted]);
+  const now = new Date();
+  const newCardsAllowed = introducedOn(cards, now) < await dailyLimit();
+  while (sessionCompleted < sessionQueue.length) {
+    const card = cards.find((item) => item.id === sessionQueue[sessionCompleted]);
+    if (card && (card.schedule ? isDue(card, now) : newCardsAllowed)) {
+      currentCard = card;
+      break;
+    }
+    // Исключённые из актуальной очереди карточки не считаются ответами.
+    sessionQueue.splice(sessionCompleted, 1);
+  }
+  if (sessionCompleted >= sessionQueue.length) currentCard = undefined;
   $("review-card").hidden = !currentCard;
   $("review-answer").hidden = true;
   $("show-answer").hidden = false;
@@ -115,15 +130,18 @@ export function setupReview(onReview = async () => {}) {
       const reviewedCard = currentCard;
       saving = true;
       $("start-review").disabled = true;
+      let queueChanged = false;
       try {
         await updateCards(async (cards) => {
           const card = cards.find((item) => item.id === reviewedCard.id);
-          if (!card || card.schedule?.reps !== reviewedCard.schedule?.reps) {
-            throw new Error("Карточка уже изменилась в другой панели. Начните занятие снова.");
-          }
           const now = new Date();
+          if (!card || card.schedule?.reps !== reviewedCard.schedule?.reps || (card.schedule && !isDue(card, now))) {
+            queueChanged = true;
+            throw new Error("Карточка уже изменилась в другой вкладке и пропущена.");
+          }
           if (!card.schedule && introducedOn(cards, now) >= await dailyLimit()) {
-            throw new Error("Дневной лимит новых карточек исчерпан. Начните занятие снова.");
+            queueChanged = true;
+            throw new Error("Дневной лимит новых карточек исчерпан.");
           }
           const result = scheduler.next(card.schedule || createEmptyCard(now), now, Number(button.dataset.rating));
           if (!card.schedule) card.firstReviewedAt = now.toISOString();
@@ -140,7 +158,12 @@ export function setupReview(onReview = async () => {}) {
         await onReview();
         await nextCard();
       } catch (error) {
-        $("review-status").textContent = `Не удалось сохранить ответ: ${error.message}`;
+        if (queueChanged) {
+          sessionQueue.splice(sessionCompleted, 1);
+          currentCard = undefined;
+          await nextCard();
+          $("review-status").textContent = `${error.message} ${$("review-status").textContent}`;
+        } else $("review-status").textContent = `Не удалось сохранить ответ: ${error.message}`;
       } finally {
         saving = false;
         $("start-review").disabled = false;
