@@ -1,56 +1,10 @@
-import { setupReview } from "./review.js";
+import "./theme.js";
+import { DEFAULT_SETTINGS } from "./settings.js";
 import { updateCards } from "./cards.js";
-import { createBackup, parseBackup, restoreBackup } from "./backup.js";
-
-const DEFAULT_SETTINGS = {
-  sourceLanguage: "English",
-  targetLanguage: "Русский",
-  apiUrl: "",
-  model: "",
-  apiKey: ""
-};
 
 const $ = (id) => document.getElementById(id);
-const form = {
-  sourceLanguage: $("source-language"),
-  targetLanguage: $("target-language"),
-  apiUrl: $("api-url"),
-  model: $("model"),
-  apiKey: $("api-key")
-};
-
 function showError(message) {
   $("error").textContent = message;
-}
-
-async function exportBackup() {
-  const { cards = [] } = await chrome.storage.local.get("cards");
-  const file = new Blob([JSON.stringify(createBackup(cards), null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(file);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `lexideck-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-  $("backup-status").textContent = `Экспортировано карточек: ${cards.length}. Ключ API не включён.`;
-}
-
-async function importBackup(file) {
-  const cards = parseBackup(await file.text());
-  await restoreBackup(cards, () => window.confirm(`В резервной копии ${cards.length} карточек. Заменить текущий словарь?`));
-  await renderCards();
-  $("backup-status").textContent = `Восстановлено карточек: ${cards.length}.`;
-}
-
-async function loadSettings() {
-  const saved = await currentSettings();
-  Object.entries(form).forEach(([key, input]) => { input.value = saved[key]; });
-}
-
-async function saveSettings() {
-  const settings = Object.fromEntries(Object.entries(form).map(([key, input]) => [key, input.value.trim()]));
-  await chrome.storage.local.set({ settings });
-  $("settings-status").textContent = "Настройки сохранены на этом устройстве.";
 }
 
 async function apiCompletion(messages, config) {
@@ -159,27 +113,48 @@ async function extractComicText(image) {
   return dialogues.join("\n");
 }
 
-async function handleComicImage(image) {
-  $("comic-status").textContent = "Распознаём текст на изображении…";
-  showError("");
-  try {
-    $("source-text").value = await extractComicText(image);
+let comicRequestId;
+let comicRequestToken;
+let handledComicRequestId;
+
+async function consumePendingComic(request) {
+  if (!request) return;
+  if (comicRequestId !== request.id) {
+    comicRequestId = request.id;
+    comicRequestToken = ++translationRequest;
+    $("source-text").value = "";
     $("result").hidden = true;
-    $("comic-status").textContent = "Проверьте и при необходимости исправьте реплики, затем подтвердите текст кнопкой ниже.";
+    $("expression-form").hidden = true;
+    $("translate").textContent = "Перевести";
+    showError("");
+  }
+  const token = comicRequestToken;
+  if (token !== translationRequest) return;
+  if (request.state === "capturing") {
+    $("comic-status").textContent = "Обрабатываем выбранную область…";
+    return;
+  }
+  if (handledComicRequestId === request.id) return;
+  handledComicRequestId = request.id;
+  await chrome.storage.session.remove("pendingComicRequest");
+  if (token !== translationRequest) return;
+  if (request.state === "error") {
+    $("comic-status").textContent = "";
+    showError(request.error);
+    return;
+  }
+  if (request.state !== "image") return;
+  $("comic-status").textContent = "Распознаём текст на изображении…";
+  try {
+    const text = await extractComicText(request.image);
+    if (token !== translationRequest) return;
+    $("source-text").value = text;
+    $("comic-status").textContent = "";
+    await runTranslation(token);
   } catch (error) {
+    if (token !== translationRequest) return;
     $("comic-status").textContent = "";
     showError(error.message || "Не удалось распознать текст на изображении.");
-  }
-}
-
-async function consumePendingComic({ pendingComicImage, pendingComicError }) {
-  if (pendingComicImage) {
-    await chrome.storage.session.remove("pendingComicImage");
-    await handleComicImage(pendingComicImage);
-  }
-  if (pendingComicError) {
-    showError(pendingComicError);
-    await chrome.storage.session.remove("pendingComicError");
   }
 }
 
@@ -222,7 +197,6 @@ async function saveWord(word) {
     }
     appendUnique(meaning.examples, word.examples);
   });
-  await renderCards();
 }
 
 let selectedExpression;
@@ -278,8 +252,7 @@ async function saveExpression(event) {
       }
       appendUnique(meaning.examples, examples);
     });
-    await renderCards();
-    $("expression-form").hidden = true;
+      $("expression-form").hidden = true;
     $("expression-meaning").value = "";
     $("save-expression").textContent = "Выражение сохранено";
   } catch (error) {
@@ -288,53 +261,6 @@ async function saveExpression(event) {
     submit.disabled = false;
     submit.textContent = "Сохранить выражение";
   }
-}
-
-async function renderCards() {
-  const { cards = [] } = await chrome.storage.local.get("cards");
-  $("vocabulary-cards").replaceChildren(...cards.map((card) => {
-    const article = document.createElement("article");
-    const heading = document.createElement("h3");
-    heading.textContent = card.headword;
-    article.append(heading);
-    const schedule = document.createElement("p");
-    if (card.schedule) {
-      const due = document.createElement("time");
-      due.dateTime = card.schedule.due;
-      due.textContent = new Date(card.schedule.due).toLocaleString("ru-RU");
-      schedule.append("Следующее повторение: ", due);
-    } else {
-      schedule.textContent = "Новая карточка";
-    }
-    article.append(schedule);
-    for (const meaning of card.meanings) {
-      const meaningHeading = document.createElement("p");
-      meaningHeading.textContent = meaning.text;
-      article.append(meaningHeading);
-      const contexts = document.createElement("ul");
-      for (const context of meaning.contexts) {
-        const item = document.createElement("li");
-        item.className = "card-context";
-        item.textContent = `${context.form}: ${context.text}`;
-        contexts.append(item);
-      }
-      article.append(contexts);
-      if (meaning.examples.length) {
-        const examplesHeading = document.createElement("p");
-        examplesHeading.textContent = "Примеры модели";
-        article.append(examplesHeading);
-        const examples = document.createElement("ul");
-        for (const example of meaning.examples) {
-          const item = document.createElement("li");
-          item.textContent = example;
-          examples.append(item);
-        }
-        article.append(examples);
-      }
-    }
-    return article;
-  }));
-  $("vocabulary-empty").hidden = cards.length > 0;
 }
 
 function renderResult(result, sourceText) {
@@ -364,56 +290,29 @@ function renderResult(result, sourceText) {
   $("result").hidden = false;
 }
 
-async function runTranslation() {
+let translationRequest = 0;
+
+async function runTranslation(existingRequest) {
   const text = $("source-text").value.trim();
   if (!text) return showError("Введите текст или выберите его на странице.");
+  const request = existingRequest ?? ++translationRequest;
+  $("comic-status").textContent = "";
   showError("");
-  $("translate").disabled = true;
+  $("result").hidden = true;
+  $("expression-form").hidden = true;
   $("translate").textContent = "Переводим…";
   try {
-    renderResult(await translate(text), text);
+    const result = await translate(text);
+    if (request !== translationRequest) return;
+    renderResult(result, text);
   } catch (error) {
-    showError(error.message || "Не удалось выполнить перевод.");
+    if (request === translationRequest) showError(error.message || "Не удалось выполнить перевод.");
   } finally {
-    $("translate").disabled = false;
-    $("translate").textContent = "Подтвердить текст и перевести";
+    if (request === translationRequest) $("translate").textContent = "Перевести";
   }
 }
 
-$("settings-toggle").addEventListener("click", () => {
-  const settings = $("settings");
-  settings.hidden = !settings.hidden;
-  $("settings-toggle").setAttribute("aria-expanded", String(!settings.hidden));
-});
-  $("save-settings").addEventListener("click", async () => {
-    $("settings-status").textContent = "";
-    $("settings-status").style.color = "";
-  try {
-    await saveSettings();
-  } catch (error) {
-    $("settings-status").textContent = `Не удалось сохранить настройки: ${error.message}`;
-    $("settings-status").style.color = "#c33";
-  }
-});
 $("translate").addEventListener("click", () => void runTranslation());
-$("export-backup").addEventListener("click", () => {
-  void exportBackup().catch((error) => { $("backup-status").textContent = `Не удалось экспортировать словарь: ${error.message}`; });
-});
-$("import-backup").addEventListener("change", async (event) => {
-  const input = event.currentTarget;
-  const [file] = input.files;
-  if (!file) return;
-  $("backup-status").textContent = "Проверяем резервную копию…";
-  try {
-    await importBackup(file);
-  } catch (error) {
-    $("backup-status").textContent = error.message.startsWith("Импорт отменён")
-      ? error.message
-      : `Не удалось импортировать словарь: ${error.message}`;
-  } finally {
-    input.value = "";
-  }
-});
 $("source-text").addEventListener("select", updateSelectedExpression);
 $("source-text").addEventListener("keyup", updateSelectedExpression);
 $("source-text").addEventListener("mouseup", updateSelectedExpression);
@@ -434,24 +333,20 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.pendingSelection?.newValue) {
     $("source-text").value = changes.pendingSelection.newValue;
     void chrome.storage.local.remove("pendingSelection");
+    void runTranslation();
   }
-  if (areaName === "session") {
-    void consumePendingComic({
-      pendingComicImage: changes.pendingComicImage?.newValue,
-      pendingComicError: changes.pendingComicError?.newValue
-    });
+  if (areaName === "session" && changes.pendingComicRequest?.newValue) {
+    void consumePendingComic(changes.pendingComicRequest.newValue);
   }
 });
 
-setupReview(renderCards);
-
-void loadSettings().then(async () => {
-  await renderCards();
+void (async () => {
   const { pendingSelection } = await chrome.storage.local.get("pendingSelection");
   if (pendingSelection) {
     $("source-text").value = pendingSelection;
     await chrome.storage.local.remove("pendingSelection");
+    void runTranslation();
   }
-  const comicState = await chrome.storage.session.get(["pendingComicImage", "pendingComicError"]);
-  await consumePendingComic(comicState);
-}).catch((error) => showError(`Не удалось загрузить настройки: ${error.message}`));
+  const { pendingComicRequest } = await chrome.storage.session.get("pendingComicRequest");
+  await consumePendingComic(pendingComicRequest);
+})().catch((error) => showError(`Не удалось загрузить панель: ${error.message}`));

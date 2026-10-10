@@ -1,6 +1,10 @@
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "LEXIDECK_GET_SELECTION") {
     sendResponse({ text: window.getSelection()?.toString() ?? "" });
+  } else if (message.type === "LEXIDECK_PREPARE_CAPTURE") {
+    // Два кадра позволяют композитору убрать слой выделения до снимка.
+    requestAnimationFrame(() => requestAnimationFrame(() => sendResponse({ ready: true })));
+    return true;
   } else if (message.type === "LEXIDECK_START_REGION_SELECTION") {
     startRegionSelection();
   }

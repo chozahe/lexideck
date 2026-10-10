@@ -1,11 +1,14 @@
 const { test, expect } = require("@playwright/test");
 
 async function configureApi(page) {
-  await page.getByRole("button", { name: "Настройки API" }).click();
+  await page.goto("/src/settings.html");
   await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
   await page.locator("#model").fill("controlled-model");
   await page.locator("#api-key").fill("test-secret");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await expect(page.getByText("Настройки сохранены на этом устройстве.")).toBeVisible();
+  await page.goto("/src/panel.html");
+  await page.locator("#source-text").fill("She took off her coat and wore her coat.");
 }
 
 async function selectComicRegion(page) {
@@ -65,8 +68,10 @@ async function selectComicRegion(page) {
       commands: { onCommand: makeEvent() },
       sidePanel: { open: async () => {} },
       tabs: {
-        captureVisibleTab: async () => window.__screenshot,
-        sendMessage: async () => ({ text: "" })
+        captureVisibleTab: (_windowId, _options, callback) => callback(window.__screenshot),
+        sendMessage: (_tabId, message, callback) => {
+          if (message.type === "LEXIDECK_PREPARE_CAPTURE") window.__contentMessageListener(message, {}, callback);
+        }
       }
     };
   });
@@ -91,7 +96,7 @@ async function selectComicRegion(page) {
   await page.mouse.up();
   return page.evaluate(async () => {
     await Promise.all(window.__pendingRuntimeMessages);
-    const image = window.__sessionValues.pendingComicImage;
+    const image = window.__sessionValues.pendingComicRequest.image;
     const bitmap = await createImageBitmap(await (await fetch(image)).blob());
     const canvas = document.createElement("canvas");
     canvas.width = bitmap.width;
@@ -111,7 +116,6 @@ test.beforeEach(async ({ request }) => {
 test("пользователь получает перевод и значения слов по порядку через API", async ({ page, request }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
-  await expect(page.getByText("Настройки сохранены на этом устройстве.")).toBeVisible();
   await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
 
   await page.getByRole("button", { name: "Перевести" }).click();
@@ -130,7 +134,7 @@ test("пользователь получает перевод и значени
   expect(call.body.messages[1].content).toBe("She took off her coat and wore her coat.");
 });
 
-test("пользователь сохраняет значения слова в одну локальную карточку и открывает её после перезапуска панели", async ({ page }) => {
+test("пользователь сохраняет значения слова в одну локальную карточку и открывает её после перезагрузки словаря", async ({ page }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
   await page.getByRole("button", { name: "Перевести" }).click();
@@ -138,14 +142,18 @@ test("пользователь сохраняет значения слова в
   const coatRows = page.locator("#word-meanings li").filter({ hasText: "coat —" });
   await coatRows.nth(0).getByRole("button", { name: "Сохранить" }).click();
   await coatRows.nth(1).getByRole("button", { name: "Сохранить" }).click();
+  await expect(coatRows.getByRole("button", { name: "Сохранено", exact: true })).toHaveCount(2);
 
-  await expect(page.locator("#vocabulary-cards article")).toHaveCount(1);
+  await page.goto("/src/vocabulary.html");
+  await expect(page.locator("#vocabulary-cards details")).toHaveCount(1);
+  await page.locator("#vocabulary-cards summary").click();
   await expect(page.locator("#vocabulary-cards")).toContainText("coat");
   await expect(page.locator("#vocabulary-cards")).toContainText("пальто, которое она сняла");
   await expect(page.locator("#vocabulary-cards")).toContainText("пальто, которое она надела");
 
   await page.reload();
-  await expect(page.locator("#vocabulary-cards article")).toHaveCount(1);
+  await expect(page.locator("#vocabulary-cards details")).toHaveCount(1);
+  await page.locator("#vocabulary-cards summary").click();
   await expect(page.locator("#vocabulary-cards")).toContainText("took off");
 });
 
@@ -153,12 +161,16 @@ test("пользователь сохраняет словоформу под о
   await page.goto("/src/panel.html");
   await configureApi(page);
   await page.getByRole("button", { name: "Перевести" }).click();
+  await expect(page.locator("#word-meanings li")).toHaveCount(3);
   await page.locator("#source-text").fill("Edited after translation");
   const phrasalVerb = page.locator("#word-meanings li").filter({ hasText: "took off —" });
   await phrasalVerb.getByRole("button", { name: "Сохранить" }).click();
+  await expect(phrasalVerb.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();
 
-  const card = page.locator("#vocabulary-cards article");
-  await expect(card.locator("h3")).toHaveText("take off");
+  await page.goto("/src/vocabulary.html");
+  const card = page.locator("#vocabulary-cards details");
+  await expect(card.locator("summary strong")).toHaveText("take off");
+  await card.locator("summary").click();
   await expect(card).toContainText("took off: She took off her coat and wore her coat.");
   await expect(card).toContainText("She took off her shoes.");
 });
@@ -174,9 +186,12 @@ test("пользователь сохраняет выделенное усто�
   await page.getByRole("button", { name: "Сохранить выделенное выражение" }).click();
   await page.locator("#expression-meaning").fill("раскрыть секрет");
   await page.getByRole("button", { name: "Сохранить выражение" }).click();
+  await expect(page.getByRole("button", { name: "Выражение сохранено", exact: true })).toBeVisible();
 
-  const expression = page.locator("#vocabulary-cards article");
+  await page.goto("/src/vocabulary.html");
+  const expression = page.locator("#vocabulary-cards details");
   await expect(expression).toHaveCount(1);
+  await expression.locator("summary").click();
   await expect(expression).toContainText("let the cat out of the bag");
   await expect(expression).toContainText("раскрыть секрет");
   await expect(expression).toContainText("She finally let the cat out of the bag.");
@@ -200,20 +215,131 @@ test("область комикса распознаётся vision-модель
   const selectedCrop = crop.image;
   await page.goto("/src/panel.html");
   await configureApi(page);
-  await page.evaluate((image) => window.chrome.storage.session.set({ pendingComicImage: image }), selectedCrop);
+  await page.evaluate((image) => window.chrome.storage.session.set({ pendingComicRequest: { id: "comic-1", state: "image", image } }), selectedCrop);
 
-  await expect(page.locator("#source-text")).toHaveValue("She took of her coat and wore her coat.");
-  await expect(page.locator("#comic-status")).toContainText("исправьте реплики");
-  await page.locator("#source-text").fill("She took off her coat and wore her coat.");
-  await page.getByRole("button", { name: "Подтвердить текст и перевести" }).click();
+  await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+  await page.locator("#source-text").fill("She took off her coat and wore her coat!");
+  await page.getByRole("button", { name: "Перевести", exact: true }).click();
 
   await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
   const calls = await (await request.get("/__test/requests")).json();
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(3);
   expect(calls[0].body.messages[1].content).toEqual([
     { type: "text", text: "Извлеки текст из выбранного фрагмента комикса." },
     { type: "image_url", image_url: { url: selectedCrop } }
   ]);
   expect(calls[1].body.messages[1].content).toBe("She took off her coat and wore her coat.");
-  expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicImage");
+  expect(calls[2].body.messages[1].content).toBe("She took off her coat and wore her coat!");
+  expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicRequest");
+});
+
+async function prepareAutomaticTranslation(page) {
+  await page.addInitScript(() => {
+    localStorage.setItem("lexideck-test-storage", JSON.stringify({
+      settings: { apiUrl: `${location.origin}/v1`, model: "controlled-model", apiKey: "test-secret" },
+      pendingSelection: "She took off her coat and wore her coat."
+    }));
+  });
+}
+
+test("выделенный текст переводится автоматически; исправление заменяет результат и показывает ошибку", async ({ page, request }) => {
+  await prepareAutomaticTranslation(page);
+  await page.goto("/src/panel.html");
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+  await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
+  await request.post("/__test/error");
+  await page.locator("#source-text").fill("Corrected text");
+  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await expect(page.locator("#result")).toBeHidden();
+  await expect(page.locator("#error")).toContainText("API вернул ошибку 401");
+});
+
+test("новое выделение заменяет запрос; запоздалый ответ не подменяет актуальный перевод", async ({ page }) => {
+  await prepareAutomaticTranslation(page);
+  let finishFirst;
+  let firstStarted;
+  const started = new Promise((resolve) => { firstStarted = resolve; });
+  await page.route("**/v1/chat/completions", async (route) => {
+    const text = route.request().postDataJSON().messages[1].content;
+    if (text.startsWith("She")) {
+      firstStarted();
+      await new Promise((resolve) => { finishFirst = resolve; });
+    }
+    await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ sentence_translation: text.startsWith("She") ? "Старый результат" : "Актуальный результат", words: [] }) } }] } });
+  });
+  await page.goto("/src/panel.html");
+  await started;
+  await expect(page.getByRole("button", { name: "Переводим…" })).toBeVisible();
+  await page.evaluate(() => chrome.storage.local.set({ pendingSelection: "New text" }));
+  await expect(page.locator("#sentence-translation")).toHaveText("Актуальный результат");
+  await page.locator("#source-text").fill("Edited text");
+  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await expect(page.locator("#sentence-translation")).toHaveText("Актуальный результат");
+  const oldResponse = page.waitForResponse((response) => response.request().postDataJSON()?.messages?.[1]?.content.startsWith("She"));
+  finishFirst();
+  await (await oldResponse).finished();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.locator("#source-text")).toHaveValue("Edited text");
+  await expect(page.locator("#sentence-translation")).toHaveText("Актуальный результат");
+});
+
+function comicRequest(id) {
+  return { id, state: "image", image: "data:image/png;base64,iVBORw0KGgo=" };
+}
+
+async function prepareComicPanel(page) {
+  await prepareAutomaticTranslation(page);
+  await page.goto("/src/panel.html");
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+}
+
+test("распознавание показывает ожидание и ошибку, не сохраняя изображение в постоянном хранилище", async ({ page }) => {
+  await prepareComicPanel(page);
+  let finishVision;
+  await page.route("**/v1/chat/completions", async (route) => {
+    await new Promise((resolve) => { finishVision = resolve; });
+    await route.fulfill({ status: 503, json: { error: "Не удалось распознать реплику" } });
+  });
+  await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("broken-image"));
+  await expect(page.locator("#comic-status")).toHaveText("Распознаём текст на изображении…");
+  await expect(page.locator("#result")).toBeHidden();
+  finishVision();
+  await expect(page.locator("#error")).toContainText("API вернул ошибку 503");
+  expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicRequest");
+  expect(await page.evaluate(() => JSON.stringify(window.__chromeValues))).not.toContain("data:image");
+});
+
+test("новый текст и новая область заменяют запоздалое распознавание", async ({ page }) => {
+  await prepareComicPanel(page);
+  let finishOldVision;
+  let visionStarted;
+  const started = new Promise((resolve) => { visionStarted = resolve; });
+  let images = 0;
+  await page.route("**/v1/chat/completions", async (route) => {
+    const text = route.request().postDataJSON().messages[1].content;
+    if (Array.isArray(text)) {
+      const imageNumber = ++images;
+      if (imageNumber === 1) {
+        visionStarted();
+        await new Promise((resolve) => { finishOldVision = resolve; });
+      }
+      await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ dialogues: [imageNumber === 1 ? "Old dialogue" : "New dialogue"] }) } }] } });
+    } else {
+      await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ sentence_translation: `Перевод: ${text}`, words: [] }) } }] } });
+    }
+  });
+  await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("old-image"));
+  await started;
+  await page.evaluate(() => chrome.storage.local.set({ pendingSelection: "New text" }));
+  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New text");
+  await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("new-image"));
+  await expect(page.locator("#source-text")).toHaveValue("New dialogue");
+  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New dialogue");
+  const oldResponse = page.waitForResponse((response) => Array.isArray(response.request().postDataJSON()?.messages?.[1]?.content));
+  finishOldVision();
+  await (await oldResponse).finished();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.locator("#source-text")).toHaveValue("New dialogue");
+  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New dialogue");
 });

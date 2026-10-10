@@ -23,13 +23,18 @@ const server = http.createServer((request, response) => {
   if (request.url === "/__test/chrome-mock.js") {
     response.writeHead(200, { "Content-Type": "text/javascript" }).end(`
       (() => {
+        const storageKey = "lexideck-test-storage";
         const values = JSON.parse(localStorage.getItem("lexideck-test-storage") || '{"settings":{},"pendingSelection":"She took off her coat and wore her coat."}');
         const sessionValues = {};
         const listeners = [];
         window.__chromeValues = values;
         window.chrome = { storage: {
           local: {
-            get: async (key) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}")); return structuredClone({ [key]: values[key] }); },
+            get: async (key) => {
+              Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"));
+              const keys = Array.isArray(key) ? key : [key];
+              return structuredClone(Object.fromEntries(keys.map((item) => [item, values[item]])));
+            },
             set: async (next) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"), structuredClone(next)); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
             remove: async (key) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}")); delete values[key]; localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); }
           },
@@ -43,6 +48,16 @@ const server = http.createServer((request, response) => {
           },
           onChanged: { addListener: (listener) => listeners.push(listener) }
         }};
+        window.addEventListener("storage", (event) => {
+          if (event.key !== storageKey || !event.newValue) return;
+          const next = JSON.parse(event.newValue);
+          const changes = {};
+          for (const key of new Set([...Object.keys(values), ...Object.keys(next)])) {
+            if (JSON.stringify(values[key]) !== JSON.stringify(next[key])) changes[key] = { oldValue: values[key], newValue: next[key] };
+          }
+          Object.assign(values, next);
+          if (Object.keys(changes).length) listeners.forEach((listener) => listener(changes, "local"));
+        });
       })();
     `);
     return;
@@ -78,7 +93,7 @@ const server = http.createServer((request, response) => {
       const isVision = Array.isArray(lastRequest.body.messages?.[1]?.content);
       const isExpressionExamples = lastRequest.body.messages?.[0]?.content.includes("Сгенерируй два дополнительных примера");
       const body = isVision
-        ? { choices: [{ message: { content: JSON.stringify({ dialogues: ["She took of her coat and wore her coat."] }) } }] }
+        ? { choices: [{ message: { content: JSON.stringify({ dialogues: ["She took off her coat and wore her coat."] }) } }] }
         : isExpressionExamples
           ? { choices: [{ message: { content: JSON.stringify({ examples: ["She finally let the cat out of the bag.", "He let the cat out of the bag by accident."] }) } }] }
           : apiBody;
@@ -97,8 +112,11 @@ const server = http.createServer((request, response) => {
     if (error) return response.writeHead(404).end("Not found");
     const mime = filePath.endsWith(".js") ? "text/javascript" : filePath.endsWith(".css") ? "text/css" : "text/html";
     let html = contents;
-    if (filePath.endsWith("panel.html")) {
+    if (filePath.endsWith(".html")) {
       html = contents.toString().replace('<script type="module" src="panel.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="panel.js"></script>');
+      html = html.replace('<script type="module" src="review-page.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="review-page.js"></script>');
+      html = html.replace('<script type="module" src="vocabulary.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="vocabulary.js"></script>');
+      html = html.replace('<script type="module" src="settings-page.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="settings-page.js"></script>');
     }
     response.writeHead(200, { "Content-Type": `${mime}; charset=utf-8` }).end(html);
   });

@@ -1,5 +1,6 @@
 const MENU_ID = "lexideck-translate-selection";
-const COMIC_IMAGE_KEY = "pendingComicImage";
+const COMIC_REQUEST_KEY = "pendingComicRequest";
+let currentComicRequest;
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
@@ -23,22 +24,23 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-chrome.commands.onCommand.addListener(async (command, tab) => {
+chrome.commands.onCommand.addListener((command, tab) => {
   if (command !== "translate-selection" || tab?.windowId == null) return;
-  try {
-    const response = await chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_GET_SELECTION" });
-    if (response?.text?.trim()) {
-      await openPanel(tab.windowId, response.text.trim());
+  // Callback сохраняет user gesture в Brave; await перед open() его теряет.
+  chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_GET_SELECTION" }, (response) => {
+    if (chrome.runtime.lastError) {
+      void openPanel(tab.windowId);
       return;
     }
-    await chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_START_REGION_SELECTION" });
-  } catch {
-    await chrome.sidePanel.open({ windowId: tab.windowId });
-  }
+    if (response?.text?.trim()) {
+      void openPanel(tab.windowId, response.text.trim());
+    } else {
+      void chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_START_REGION_SELECTION" });
+    }
+  });
 });
 
-async function cropVisibleTab(windowId, rect, viewport) {
-  const screenshot = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+async function cropVisibleTab(screenshot, rect, viewport) {
   const source = await createImageBitmap(await (await fetch(screenshot)).blob());
   const scaleX = source.width / viewport.width;
   const scaleY = source.height / viewport.height;
@@ -63,17 +65,33 @@ async function cropVisibleTab(windowId, rect, viewport) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type !== "LEXIDECK_REGION_SELECTED" || sender.tab?.windowId == null) return;
-  void (async () => {
-    try {
-      const image = await cropVisibleTab(sender.tab.windowId, message.rect, message.viewport);
-      await chrome.storage.session.set({ [COMIC_IMAGE_KEY]: image });
-      await chrome.sidePanel.open({ windowId: sender.tab.windowId });
-      sendResponse({ ok: true });
-    } catch (error) {
-      await chrome.storage.session.set({ pendingComicError: error.message || "Не удалось захватить область страницы." });
-      await chrome.sidePanel.open({ windowId: sender.tab.windowId });
-      sendResponse({ ok: false });
-    }
-  })();
+  const id = crypto.randomUUID();
+  currentComicRequest = id;
+  const storing = chrome.storage.session.set({ [COMIC_REQUEST_KEY]: { id, state: "capturing" } });
+  chrome.tabs.sendMessage(sender.tab.id, { type: "LEXIDECK_PREPARE_CAPTURE" }, () => {
+    // Callback сообщения сохраняет жест до перерисовки content script.
+    const preparationError = chrome.runtime.lastError?.message;
+    // Снимок фиксируется до изменения ширины страницы. Callback сохраняет user gesture.
+    chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: "png" }, (screenshot) => {
+      const captureError = preparationError || chrome.runtime.lastError?.message;
+      const opening = chrome.sidePanel.open({ windowId: sender.tab.windowId });
+      void (async () => {
+        try {
+          await Promise.all([storing, opening]);
+          if (captureError) throw new Error(captureError);
+          const image = await cropVisibleTab(screenshot, message.rect, message.viewport);
+          if (currentComicRequest === id) {
+            await chrome.storage.session.set({ [COMIC_REQUEST_KEY]: { id, state: "image", image } });
+          }
+          sendResponse({ ok: true });
+        } catch (error) {
+          if (currentComicRequest === id) {
+            await chrome.storage.session.set({ [COMIC_REQUEST_KEY]: { id, state: "error", error: error.message || "Не удалось захватить область страницы." } });
+          }
+          sendResponse({ ok: false });
+        }
+      })();
+    });
+  });
   return true;
 });

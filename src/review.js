@@ -6,6 +6,9 @@ const scheduler = fsrs();
 const $ = (id) => document.getElementById(id);
 let currentCard;
 let saving = false;
+let sessionQueue = [];
+let sessionCompleted = 0;
+let sessionStarted = false;
 
 function localDay(date) {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
@@ -20,17 +23,64 @@ function introducedOn(cards, now) {
   return cards.filter((card) => card.firstReviewedAt && localDay(new Date(card.firstReviewedAt)) === localDay(now)).length;
 }
 
+function isDue(card, now) {
+  return card.schedule && new Date(card.schedule.due) <= now;
+}
+
+function renderProgress() {
+  const progress = $("review-progress");
+  const bar = $("review-progress-bar");
+  if (!sessionStarted) {
+    progress.textContent = "Занятие ещё не начато.";
+    bar.hidden = true;
+    bar.value = 0;
+    return;
+  }
+  const total = sessionQueue.length;
+  const remaining = Math.max(0, total - sessionCompleted);
+  progress.textContent = `Пройдено ${sessionCompleted} из ${total}. Осталось ${remaining}.`;
+  bar.hidden = total === 0;
+  bar.max = Math.max(total, 1);
+  bar.value = sessionCompleted;
+}
+
+async function startSession() {
+  sessionQueue = [];
+  sessionCompleted = 0;
+  sessionStarted = true;
+  await nextCard();
+}
+
 async function nextCard() {
+  if (!sessionStarted) {
+    currentCard = undefined;
+    $("review-card").hidden = true;
+    renderProgress();
+    return;
+  }
   const { cards = [] } = await chrome.storage.local.get("cards");
   const now = new Date();
-  const limit = await dailyLimit();
-  const introducedToday = introducedOn(cards, now);
-  currentCard = cards.find((card) => card.schedule && new Date(card.schedule.due) <= now)
-    || (introducedToday < limit ? cards.find((card) => !card.schedule) : undefined);
+  const remainingNew = Math.max(0, await dailyLimit() - introducedOn(cards, now));
+  const available = [
+    ...cards.filter((card) => isDue(card, now)),
+    ...cards.filter((card) => !card.schedule).slice(0, remainingNew)
+  ];
+  // Пересчитываем остаток по FSRS: срок уже оценённой карточки мог наступить снова.
+  sessionQueue.splice(sessionCompleted, sessionQueue.length - sessionCompleted, ...available.map((card) => card.id));
+  currentCard = available[0];
   $("review-card").hidden = !currentCard;
   $("review-answer").hidden = true;
   $("show-answer").hidden = false;
-  $("review-status").textContent = currentCard ? "Вспомните значение, затем откройте ответ." : "На сегодня всё. Карточек для занятия пока нет.";
+  if (currentCard) {
+    $("review-status").textContent = "Вспомните значение, затем откройте ответ.";
+  } else if (!sessionQueue.length) {
+    $("review-status").textContent = "На сегодня всё. Карточек для занятия пока нет.";
+  } else if (sessionCompleted >= sessionQueue.length) {
+    $("review-status").textContent = "Занятие завершено: все карточки пройдены.";
+  } else {
+    $("review-status").textContent = "Очередь изменилась в другой вкладке. Начните занятие снова.";
+  }
+  renderProgress();
   if (currentCard) $("review-headword").textContent = currentCard.headword;
 }
 
@@ -52,28 +102,14 @@ function showAnswer() {
   $("show-answer").hidden = true;
 }
 
-export function setupReview(onReview) {
+export function setupReview(onReview = async () => {}) {
+  if (!$("review")) return;
   void renderStudyStats();
-  void dailyLimit().then((limit) => { $("new-card-limit").value = limit; }).catch((error) => {
-    $("review-settings-status").textContent = `Не удалось загрузить лимит: ${error.message}`;
-  });
-  $("review-settings").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const limit = Number($("new-card-limit").value);
-    if (!Number.isSafeInteger(limit) || limit < 0) {
-      $("review-settings-status").textContent = "Укажите целое неотрицательное число.";
-      return;
-    }
-    try {
-      await chrome.storage.local.set({ newCardLimit: limit });
-      $("review-settings-status").textContent = "Лимит сохранён.";
-      if (!saving) await nextCard();
-    } catch (error) {
-      $("review-settings-status").textContent = `Не удалось сохранить лимит: ${error.message}`;
-    }
-  });
   $("start-review").addEventListener("click", () => {
-    void nextCard().catch((error) => { $("review-status").textContent = error.message; });
+    $("start-review").disabled = true;
+    void startSession().catch((error) => { $("review-status").textContent = error.message; }).finally(() => {
+      $("start-review").disabled = saving;
+    });
   });
   $("show-answer").addEventListener("click", showAnswer);
   for (const button of $("review-ratings").querySelectorAll("button")) {
@@ -82,15 +118,18 @@ export function setupReview(onReview) {
       const reviewedCard = currentCard;
       saving = true;
       $("start-review").disabled = true;
+      let queueChanged = false;
       try {
         await updateCards(async (cards) => {
           const card = cards.find((item) => item.id === reviewedCard.id);
-          if (!card || card.schedule?.reps !== reviewedCard.schedule?.reps) {
-            throw new Error("Карточка уже изменилась в другой панели. Начните занятие снова.");
-          }
           const now = new Date();
+          if (!card || card.schedule?.reps !== reviewedCard.schedule?.reps || (card.schedule && !isDue(card, now))) {
+            queueChanged = true;
+            throw new Error("Карточка уже изменилась в другой вкладке и пропущена.");
+          }
           if (!card.schedule && introducedOn(cards, now) >= await dailyLimit()) {
-            throw new Error("Дневной лимит новых карточек исчерпан. Начните занятие снова.");
+            queueChanged = true;
+            throw new Error("Дневной лимит новых карточек исчерпан.");
           }
           const result = scheduler.next(card.schedule || createEmptyCard(now), now, Number(button.dataset.rating));
           if (!card.schedule) card.firstReviewedAt = now.toISOString();
@@ -100,13 +139,19 @@ export function setupReview(onReview) {
           card.reviewHistory = [...(card.reviewHistory || []), { ...JSON.parse(JSON.stringify(result.log)), meaningIndex }];
         });
         await recordStudyReview();
+        sessionCompleted += 1;
         currentCard = undefined;
         $("review-card").hidden = true;
         await renderStudyStats();
         await onReview();
         await nextCard();
       } catch (error) {
-        $("review-status").textContent = `Не удалось сохранить ответ: ${error.message}`;
+        if (queueChanged) {
+          sessionQueue.splice(sessionCompleted, 1);
+          currentCard = undefined;
+          await nextCard();
+          $("review-status").textContent = `${error.message} ${$("review-status").textContent}`;
+        } else $("review-status").textContent = `Не удалось сохранить ответ: ${error.message}`;
       } finally {
         saving = false;
         $("start-review").disabled = false;
