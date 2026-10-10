@@ -39,10 +39,10 @@ test("горячая клавиша и контекстное меню откр�
       storage: { local: { async set(value) { savedValues.push(value); } } },
       sidePanel: { async open(options) { openedPanels.push(options); } },
       tabs: {
-        async sendMessage(_tabId, message) {
+        async sendMessage(_tabId, message, callback) {
           requestedActions.push(message.type);
           if (message.type === "LEXIDECK_START_REGION_SELECTION") return undefined;
-          return new Promise((resolve) => messages.emit(message, {}, resolve));
+          return new Promise((resolve) => messages.emit(message, {}, (value) => { callback?.(value); resolve(value); }));
         }
       }
     }
@@ -51,8 +51,11 @@ test("горячая клавиша и контекстное меню откр�
   installed.emit();
   menuClicks.emit({ menuItemId: "lexideck-translate-selection", selectionText: "From context menu" }, { windowId: 7 });
   await commands.emit("translate-selection", { id: 12, windowId: 8 });
+  await new Promise((resolve) => setImmediate(resolve));
   selectedText = "";
   await commands.emit("translate-selection", { id: 13, windowId: 9 });
+
+  await new Promise((resolve) => setImmediate(resolve));
 
   expect(menuItems).toEqual([{
     id: "lexideck-translate-selection",
