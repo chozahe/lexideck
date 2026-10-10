@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lexideck — словарь</title>
+    <link rel="stylesheet" href="panel.css">
+    <script type="module" src="vocabulary.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Lexideck</h1>
+        <nav aria-label="Основная навигация">
+          <a href="review.html">Повторение</a>
+          <a href="vocabulary.html" aria-current="page">Словарь</a>
+          <a href="settings.html">Настройки</a>
+        </nav>
+      </header>
+      <section aria-labelledby="vocabulary-heading">
+        <h2 id="vocabulary-heading">Словарь</h2>
+        <label for="vocabulary-search">Поиск по основной форме или значению</label>
+        <input id="vocabulary-search" type="search" autocomplete="off" placeholder="Введите слово или значение">
+        <p id="vocabulary-status" role="status" aria-live="polite"></p>
+        <p id="vocabulary-empty">Пока нет сохранённых карточек.</p>
+        <p id="vocabulary-no-results" hidden>По этому запросу карточки не найдены.</p>
+        <div id="vocabulary-cards" aria-live="polite"></div>
+      </section>
+      <section aria-labelledby="backup-heading">
+        <h2 id="backup-heading">Резервная копия</h2>
+        <button id="export-backup" type="button">Скачать резервную копию</button>
+        <label for="import-backup">Восстановить словарь из файла</label>
+        <input id="import-backup" type="file" accept="application/json,.json">
+        <p id="backup-status" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+  </body>
+</html>

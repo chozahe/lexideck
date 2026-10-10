@@ -1,6 +1,4 @@
-import { setupReview } from "./review.js";
 import { updateCards } from "./cards.js";
-import { createBackup, parseBackup, restoreBackup } from "./backup.js";
 
 const DEFAULT_SETTINGS = {
   sourceLanguage: "English",
@@ -21,25 +19,6 @@ const form = {
 
 function showError(message) {
   $("error").textContent = message;
-}
-
-async function exportBackup() {
-  const { cards = [] } = await chrome.storage.local.get("cards");
-  const file = new Blob([JSON.stringify(createBackup(cards), null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(file);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `lexideck-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-  $("backup-status").textContent = `Экспортировано карточек: ${cards.length}. Ключ API не включён.`;
-}
-
-async function importBackup(file) {
-  const cards = parseBackup(await file.text());
-  await restoreBackup(cards, () => window.confirm(`В резервной копии ${cards.length} карточек. Заменить текущий словарь?`));
-  await renderCards();
-  $("backup-status").textContent = `Восстановлено карточек: ${cards.length}.`;
 }
 
 async function loadSettings() {
@@ -222,7 +201,6 @@ async function saveWord(word) {
     }
     appendUnique(meaning.examples, word.examples);
   });
-  await renderCards();
 }
 
 let selectedExpression;
@@ -278,8 +256,7 @@ async function saveExpression(event) {
       }
       appendUnique(meaning.examples, examples);
     });
-    await renderCards();
-    $("expression-form").hidden = true;
+      $("expression-form").hidden = true;
     $("expression-meaning").value = "";
     $("save-expression").textContent = "Выражение сохранено";
   } catch (error) {
@@ -288,53 +265,6 @@ async function saveExpression(event) {
     submit.disabled = false;
     submit.textContent = "Сохранить выражение";
   }
-}
-
-async function renderCards() {
-  const { cards = [] } = await chrome.storage.local.get("cards");
-  $("vocabulary-cards").replaceChildren(...cards.map((card) => {
-    const article = document.createElement("article");
-    const heading = document.createElement("h3");
-    heading.textContent = card.headword;
-    article.append(heading);
-    const schedule = document.createElement("p");
-    if (card.schedule) {
-      const due = document.createElement("time");
-      due.dateTime = card.schedule.due;
-      due.textContent = new Date(card.schedule.due).toLocaleString("ru-RU");
-      schedule.append("Следующее повторение: ", due);
-    } else {
-      schedule.textContent = "Новая карточка";
-    }
-    article.append(schedule);
-    for (const meaning of card.meanings) {
-      const meaningHeading = document.createElement("p");
-      meaningHeading.textContent = meaning.text;
-      article.append(meaningHeading);
-      const contexts = document.createElement("ul");
-      for (const context of meaning.contexts) {
-        const item = document.createElement("li");
-        item.className = "card-context";
-        item.textContent = `${context.form}: ${context.text}`;
-        contexts.append(item);
-      }
-      article.append(contexts);
-      if (meaning.examples.length) {
-        const examplesHeading = document.createElement("p");
-        examplesHeading.textContent = "Примеры модели";
-        article.append(examplesHeading);
-        const examples = document.createElement("ul");
-        for (const example of meaning.examples) {
-          const item = document.createElement("li");
-          item.textContent = example;
-          examples.append(item);
-        }
-        article.append(examples);
-      }
-    }
-    return article;
-  }));
-  $("vocabulary-empty").hidden = cards.length > 0;
 }
 
 function renderResult(result, sourceText) {
@@ -401,24 +331,6 @@ $("settings-toggle").addEventListener("click", () => {
   }
 });
 $("translate").addEventListener("click", () => void runTranslation());
-$("export-backup").addEventListener("click", () => {
-  void exportBackup().catch((error) => { $("backup-status").textContent = `Не удалось экспортировать словарь: ${error.message}`; });
-});
-$("import-backup").addEventListener("change", async (event) => {
-  const input = event.currentTarget;
-  const [file] = input.files;
-  if (!file) return;
-  $("backup-status").textContent = "Проверяем резервную копию…";
-  try {
-    await importBackup(file);
-  } catch (error) {
-    $("backup-status").textContent = error.message.startsWith("Импорт отменён")
-      ? error.message
-      : `Не удалось импортировать словарь: ${error.message}`;
-  } finally {
-    input.value = "";
-  }
-});
 $("source-text").addEventListener("select", updateSelectedExpression);
 $("source-text").addEventListener("keyup", updateSelectedExpression);
 $("source-text").addEventListener("mouseup", updateSelectedExpression);
@@ -449,10 +361,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
-setupReview(renderCards);
-
 void loadSettings().then(async () => {
-  await renderCards();
   const { pendingSelection } = await chrome.storage.local.get("pendingSelection");
   if (pendingSelection) {
     $("source-text").value = pendingSelection;

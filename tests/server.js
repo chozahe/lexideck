@@ -23,6 +23,7 @@ const server = http.createServer((request, response) => {
   if (request.url === "/__test/chrome-mock.js") {
     response.writeHead(200, { "Content-Type": "text/javascript" }).end(`
       (() => {
+        const storageKey = "lexideck-test-storage";
         const values = JSON.parse(localStorage.getItem("lexideck-test-storage") || '{"settings":{},"pendingSelection":"She took off her coat and wore her coat."}');
         const sessionValues = {};
         const listeners = [];
@@ -43,6 +44,16 @@ const server = http.createServer((request, response) => {
           },
           onChanged: { addListener: (listener) => listeners.push(listener) }
         }};
+        window.addEventListener("storage", (event) => {
+          if (event.key !== storageKey || !event.newValue) return;
+          const next = JSON.parse(event.newValue);
+          const changes = {};
+          for (const key of new Set([...Object.keys(values), ...Object.keys(next)])) {
+            if (JSON.stringify(values[key]) !== JSON.stringify(next[key])) changes[key] = { oldValue: values[key], newValue: next[key] };
+          }
+          Object.assign(values, next);
+          if (Object.keys(changes).length) listeners.forEach((listener) => listener(changes, "local"));
+        });
       })();
     `);
     return;
@@ -100,6 +111,8 @@ const server = http.createServer((request, response) => {
     if (filePath.endsWith(".html")) {
       html = contents.toString().replace('<script type="module" src="panel.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="panel.js"></script>');
       html = html.replace('<script type="module" src="review-page.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="review-page.js"></script>');
+      html = html.replace('<script type="module" src="vocabulary.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="vocabulary.js"></script>');
+      html = html.replace('<script type="module" src="settings-page.js"></script>', '<script src="/__test/chrome-mock.js"></script><script type="module" src="settings-page.js"></script>');
     }
     response.writeHead(200, { "Content-Type": `${mime}; charset=utf-8` }).end(html);
   });

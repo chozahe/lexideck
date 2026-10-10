@@ -21,6 +21,11 @@ button:disabled { opacity: .6; cursor: wait; }
 #vocabulary-cards article { border-top: 1px solid #8886; padding: 10px 0; }
 #vocabulary-cards h3 { margin: 0 0 6px; font-size: 1rem; }
 #vocabulary-cards ul { margin: 4px 0; padding-left: 20px; }
+.vocabulary-card { border-top: 1px solid #8886; padding: 10px 0; }
+.vocabulary-card summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; cursor: pointer; }
+.vocabulary-meaning { padding-inline-start: 16px; }
+.vocabulary-meaning h3 { font-size: 1rem; }
+input[type="search"] { margin-top: 4px; }
 .card-context { color: #777; }
 #review-card { border: 1px solid #8886; border-radius: 8px; padding: 16px; margin-top: 12px; }
 #review-headword { font-size: 1.6rem; margin: 0 0 16px; overflow-wrap: anywhere; }

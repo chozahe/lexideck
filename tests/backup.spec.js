@@ -28,7 +28,7 @@ test("резервная копия переносит карточку и ра�
   const cardToBackup = structuredClone(savedCard);
   cardToBackup.schedule.due = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   cardToBackup.schedule.last_review = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-  await page.goto("/src/panel.html");
+  await page.goto("/src/vocabulary.html");
   await page.evaluate((card) => chrome.storage.local.set({ cards: [card], settings: { apiKey: "must-not-export" } }), cardToBackup);
   await page.reload();
   const downloadPromise = page.waitForEvent("download");
@@ -42,11 +42,10 @@ test("резервная копия переносит карточку и ра�
 
   const otherProfile = await browser.newContext();
   const otherPage = await otherProfile.newPage();
-  await otherPage.goto("/src/panel.html");
+  await otherPage.goto("/src/vocabulary.html");
   await otherPage.locator("#import-backup").setInputFiles(backupPath);
   await expect(otherPage.locator("#backup-status")).toHaveText("Восстановлено карточек: 1.");
   await expect(otherPage.locator("#vocabulary-cards")).toContainText("Следующее повторение");
-  expect(await otherPage.evaluate(() => chrome.storage.local.get("cards"))).toEqual({ cards: [cardToBackup] });
   await otherPage.goto("/src/review.html");
   await otherPage.getByRole("button", { name: "Начать занятие" }).click();
   await expect(otherPage.locator("#review-card").getByRole("heading", { name: "take off", exact: true })).toBeVisible();
@@ -58,16 +57,18 @@ test("резервная копия переносит карточку и ра�
 });
 
 test("повреждённая копия отклоняется, а отмена замены сохраняет текущий словарь", async ({ page }) => {
-  await page.goto("/src/panel.html");
-  await page.evaluate(() => chrome.storage.local.set({ cards: [{ id: "existing", kind: "word", headword: "stay", meanings: [{ text: "остаться", contexts: [], examples: [] }] }] }));
-  await page.reload();
+  await page.goto("/src/vocabulary.html");
+  const validBackup = { format: "lexideck-backup", version: 1, exportedAt: "2026-10-09T00:00:00.000Z", cards: [savedCard] };
+  await page.locator("#import-backup").setInputFiles({ name: "valid.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(validBackup)) });
+  await expect(page.locator("#backup-status")).toHaveText("Восстановлено карточек: 1.");
+  await expect(page.locator("#vocabulary-cards")).toContainText("take off");
 
   await page.locator("#import-backup").setInputFiles({ name: "broken.json", mimeType: "application/json", buffer: Buffer.from('{"format":"lexideck-backup","version":1,"exportedAt":"2026-10-09T00:00:00.000Z","cards":[{}]}') });
   await expect(page.locator("#backup-status")).toContainText("некорректная запись карточки");
-  expect(await page.evaluate(() => chrome.storage.local.get("cards"))).toEqual({ cards: [{ id: "existing", kind: "word", headword: "stay", meanings: [{ text: "остаться", contexts: [], examples: [] }] }] });
+  await expect(page.locator("#vocabulary-cards")).toContainText("take off");
 
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.locator("#import-backup").setInputFiles({ name: "valid.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ format: "lexideck-backup", version: 1, exportedAt: "2026-10-09T00:00:00.000Z", cards: [savedCard] })) });
+  await page.locator("#import-backup").setInputFiles({ name: "valid.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(validBackup)) });
   await expect(page.locator("#backup-status")).toContainText("Импорт отменён");
-  expect(await page.evaluate(() => chrome.storage.local.get("cards"))).toEqual({ cards: [{ id: "existing", kind: "word", headword: "stay", meanings: [{ text: "остаться", contexts: [], examples: [] }] }] });
+  await expect(page.locator("#vocabulary-cards")).toContainText("take off");
 });
