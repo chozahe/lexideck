@@ -45,18 +45,9 @@ function renderProgress() {
 }
 
 async function startSession() {
-  const { cards = [] } = await chrome.storage.local.get("cards");
-  const now = new Date();
-  const limit = await dailyLimit();
-  const introducedToday = introducedOn(cards, now);
-  const dueCards = cards.filter((card) => isDue(card, now));
-  const newCards = introducedToday < limit
-    ? cards.filter((card) => !card.schedule).slice(0, limit - introducedToday)
-    : [];
-  sessionQueue = [...dueCards, ...newCards].map((card) => card.id);
+  sessionQueue = [];
   sessionCompleted = 0;
   sessionStarted = true;
-  renderProgress();
   await nextCard();
 }
 
@@ -69,17 +60,14 @@ async function nextCard() {
   }
   const { cards = [] } = await chrome.storage.local.get("cards");
   const now = new Date();
-  const newCardsAllowed = introducedOn(cards, now) < await dailyLimit();
-  while (sessionCompleted < sessionQueue.length) {
-    const card = cards.find((item) => item.id === sessionQueue[sessionCompleted]);
-    if (card && (card.schedule ? isDue(card, now) : newCardsAllowed)) {
-      currentCard = card;
-      break;
-    }
-    // Исключённые из актуальной очереди карточки не считаются ответами.
-    sessionQueue.splice(sessionCompleted, 1);
-  }
-  if (sessionCompleted >= sessionQueue.length) currentCard = undefined;
+  const remainingNew = Math.max(0, await dailyLimit() - introducedOn(cards, now));
+  const available = [
+    ...cards.filter((card) => isDue(card, now)),
+    ...cards.filter((card) => !card.schedule).slice(0, remainingNew)
+  ];
+  // Пересчитываем остаток по FSRS: срок уже оценённой карточки мог наступить снова.
+  sessionQueue.splice(sessionCompleted, sessionQueue.length - sessionCompleted, ...available.map((card) => card.id));
+  currentCard = available[0];
   $("review-card").hidden = !currentCard;
   $("review-answer").hidden = true;
   $("show-answer").hidden = false;

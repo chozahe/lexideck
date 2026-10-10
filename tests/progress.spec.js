@@ -55,6 +55,29 @@ test("пустая очередь показывает нулевой прогр
   await expect(page.locator("#review-status")).toHaveText("На сегодня всё. Карточек для занятия пока нет.");
 });
 
+test("карточка возвращается в занятие, когда срок повторения наступает во время другой карточки", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
+  await seed(page, 2, 2);
+  await page.getByRole("button", { name: "Начать занятие" }).click();
+  await expect(page.locator("#review-headword")).toHaveText("word 1");
+  await page.getByRole("button", { name: "Показать ответ" }).click();
+  await page.getByRole("button", { name: "Не вспомнил", exact: true }).click();
+  await expect(page.locator("#review-headword")).toHaveText("word 2");
+
+  await page.clock.setSystemTime(new Date("2026-10-09T12:02:00Z"));
+  await page.getByRole("button", { name: "Показать ответ" }).click();
+  await page.getByRole("button", { name: "Легко", exact: true }).click();
+  await expect(page.locator("#review-card")).toBeVisible();
+  await expect(page.locator("#review-headword")).toHaveText("word 1");
+  await expect(page.locator("#review-progress")).toHaveText("Пройдено 2 из 3. Осталось 1.");
+
+  await page.getByRole("button", { name: "Показать ответ" }).click();
+  await page.getByRole("button", { name: "Легко", exact: true }).click();
+  await expect(page.locator("#review-progress")).toHaveText("Пройдено 3 из 3. Осталось 0.");
+  await expect(page.locator("#review-status")).toHaveText("Занятие завершено: все карточки пройдены.");
+  await expect(page.locator("#review-card")).toBeHidden();
+});
+
 test("очередь новых карточек ограничена дневным лимитом", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
   await seed(page, 3, 1);

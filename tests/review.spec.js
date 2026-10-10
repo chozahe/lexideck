@@ -243,11 +243,14 @@ test("очередь пропускает карточки, чей срок др
   await page.goto("/src/review.html");
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(page.locator("#review-progress")).toHaveText("Пройдено 0 из 3. Осталось 3.");
+  await rateVisibleCard(page, "a");
+  await expect(page.locator("#review-headword")).toHaveText("b");
   await rateVisibleCard(other, "b");
   await expect(other.locator("#review-headword")).toHaveText("c");
   await rateVisibleCard(other, "c");
   await expect(other.locator("#review-card")).toBeHidden();
-  await rateVisibleCard(page, "a");
+  await rateVisibleCard(page, "b");
+  await expect(page.locator("#review-status")).toContainText("Карточка уже изменилась");
   await expect(page.locator("#review-card")).toBeHidden();
   await expect(page.locator("#review-progress")).toHaveText("Пройдено 1 из 1. Осталось 0.");
   await expect(page.locator("#review-status")).toContainText("Занятие завершено");
