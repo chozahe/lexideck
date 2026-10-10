@@ -104,7 +104,7 @@ async function saveTranslatedWords(page) {
   await page.evaluate(() => chrome.storage.local.remove("pendingSelection"));
   await page.goto("/src/panel.html");
   await page.locator("#source-text").fill("She took off her coat and wore her coat.");
-  await page.getByRole("button", { name: "Подтвердить текст и перевести" }).click();
+  await page.locator("#translate").click();
   for (const row of await page.locator("#word-meanings li").all()) {
     await row.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(row.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();

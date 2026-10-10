@@ -6,6 +6,9 @@ const scheduler = fsrs();
 const $ = (id) => document.getElementById(id);
 let currentCard;
 let saving = false;
+let sessionQueue = [];
+let sessionCompleted = 0;
+let sessionStarted = false;
 
 function localDay(date) {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
@@ -20,17 +23,61 @@ function introducedOn(cards, now) {
   return cards.filter((card) => card.firstReviewedAt && localDay(new Date(card.firstReviewedAt)) === localDay(now)).length;
 }
 
-async function nextCard() {
+function renderProgress() {
+  const progress = $("review-progress");
+  const bar = $("review-progress-bar");
+  if (!sessionStarted) {
+    progress.textContent = "Занятие ещё не начато.";
+    bar.hidden = true;
+    bar.value = 0;
+    return;
+  }
+  const total = sessionQueue.length;
+  const remaining = Math.max(0, total - sessionCompleted);
+  progress.textContent = `Пройдено ${sessionCompleted} из ${total}. Осталось ${remaining}.`;
+  bar.hidden = total === 0;
+  bar.max = Math.max(total, 1);
+  bar.value = sessionCompleted;
+}
+
+async function startSession() {
   const { cards = [] } = await chrome.storage.local.get("cards");
   const now = new Date();
   const limit = await dailyLimit();
   const introducedToday = introducedOn(cards, now);
-  currentCard = cards.find((card) => card.schedule && new Date(card.schedule.due) <= now)
-    || (introducedToday < limit ? cards.find((card) => !card.schedule) : undefined);
+  const dueCards = cards.filter((card) => card.schedule && new Date(card.schedule.due) <= now);
+  const newCards = introducedToday < limit
+    ? cards.filter((card) => !card.schedule).slice(0, limit - introducedToday)
+    : [];
+  sessionQueue = [...dueCards, ...newCards].map((card) => card.id);
+  sessionCompleted = 0;
+  sessionStarted = true;
+  renderProgress();
+  await nextCard();
+}
+
+async function nextCard() {
+  if (!sessionStarted) {
+    currentCard = undefined;
+    $("review-card").hidden = true;
+    renderProgress();
+    return;
+  }
+  const { cards = [] } = await chrome.storage.local.get("cards");
+  currentCard = cards.find((card) => card.id === sessionQueue[sessionCompleted]);
   $("review-card").hidden = !currentCard;
   $("review-answer").hidden = true;
   $("show-answer").hidden = false;
-  $("review-status").textContent = currentCard ? "Вспомните значение, затем откройте ответ." : "На сегодня всё. Карточек для занятия пока нет.";
+  if (currentCard) {
+    $("review-status").textContent = "Вспомните значение, затем откройте ответ.";
+  } else if (!sessionQueue.length) {
+    $("review-status").textContent = "На сегодня всё. Карточек для занятия пока нет.";
+  } else if (sessionCompleted >= sessionQueue.length) {
+    $("review-status").textContent = "Занятие завершено: все карточки пройдены.";
+  } else {
+    $("review-status").textContent = "Очередь изменилась в другой вкладке. Начните занятие снова.";
+  }
+  renderProgress();
   if (currentCard) $("review-headword").textContent = currentCard.headword;
 }
 
@@ -56,7 +103,10 @@ export function setupReview(onReview = async () => {}) {
   if (!$("review")) return;
   void renderStudyStats();
   $("start-review").addEventListener("click", () => {
-    void nextCard().catch((error) => { $("review-status").textContent = error.message; });
+    $("start-review").disabled = true;
+    void startSession().catch((error) => { $("review-status").textContent = error.message; }).finally(() => {
+      $("start-review").disabled = saving;
+    });
   });
   $("show-answer").addEventListener("click", showAnswer);
   for (const button of $("review-ratings").querySelectorAll("button")) {
@@ -83,6 +133,7 @@ export function setupReview(onReview = async () => {}) {
           card.reviewHistory = [...(card.reviewHistory || []), { ...JSON.parse(JSON.stringify(result.log)), meaningIndex }];
         });
         await recordStudyReview();
+        sessionCompleted += 1;
         currentCard = undefined;
         $("review-card").hidden = true;
         await renderStudyStats();
