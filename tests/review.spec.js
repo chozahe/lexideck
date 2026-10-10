@@ -96,7 +96,7 @@ async function saveTranslatedWords(page) {
   await page.locator("#model").fill("controlled-model");
   await page.locator("#api-key").fill("test-secret");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
-  await page.getByRole("button", { name: "Подтвердить текст и перевести" }).click();
+  await page.locator("#translate").click();
   for (const row of await page.locator("#word-meanings li").all()) {
     await row.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(row.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();
