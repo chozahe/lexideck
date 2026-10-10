@@ -23,18 +23,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-chrome.commands.onCommand.addListener(async (command, tab) => {
+chrome.commands.onCommand.addListener((command, tab) => {
   if (command !== "translate-selection" || tab?.windowId == null) return;
-  try {
-    const response = await chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_GET_SELECTION" });
-    if (response?.text?.trim()) {
-      await openPanel(tab.windowId, response.text.trim());
+  // Callback сохраняет user gesture в Brave; await перед open() его теряет.
+  chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_GET_SELECTION" }, (response) => {
+    if (chrome.runtime.lastError) {
+      void openPanel(tab.windowId);
       return;
     }
-    await chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_START_REGION_SELECTION" });
-  } catch {
-    await chrome.sidePanel.open({ windowId: tab.windowId });
-  }
+    if (response?.text?.trim()) {
+      void openPanel(tab.windowId, response.text.trim());
+    } else {
+      void chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_START_REGION_SELECTION" });
+    }
+  });
 });
 
 async function cropVisibleTab(windowId, rect, viewport) {

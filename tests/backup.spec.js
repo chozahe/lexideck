@@ -47,6 +47,7 @@ test("резервная копия переносит карточку и ра�
   await expect(otherPage.locator("#backup-status")).toHaveText("Восстановлено карточек: 1.");
   await expect(otherPage.locator("#vocabulary-cards")).toContainText("Следующее повторение");
   expect(await otherPage.evaluate(() => chrome.storage.local.get("cards"))).toEqual({ cards: [cardToBackup] });
+  await otherPage.goto("/src/review.html");
   await otherPage.getByRole("button", { name: "Начать занятие" }).click();
   await expect(otherPage.locator("#review-card").getByRole("heading", { name: "take off", exact: true })).toBeVisible();
   await otherPage.getByRole("button", { name: "Показать ответ" }).click();

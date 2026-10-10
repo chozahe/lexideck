@@ -205,7 +205,7 @@ test("область комикса распознаётся vision-модель
   await expect(page.locator("#source-text")).toHaveValue("She took of her coat and wore her coat.");
   await expect(page.locator("#comic-status")).toContainText("исправьте реплики");
   await page.locator("#source-text").fill("She took off her coat and wore her coat.");
-  await page.getByRole("button", { name: "Подтвердить текст и перевести" }).click();
+  await page.getByRole("button", { name: "Перевести", exact: true }).click();
 
   await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
   const calls = await (await request.get("/__test/requests")).json();
@@ -216,4 +216,54 @@ test("область комикса распознаётся vision-модель
   ]);
   expect(calls[1].body.messages[1].content).toBe("She took off her coat and wore her coat.");
   expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicImage");
+});
+
+async function prepareAutomaticTranslation(page) {
+  await page.addInitScript(() => {
+    localStorage.setItem("lexideck-test-storage", JSON.stringify({
+      settings: { apiUrl: "http://127.0.0.1:4173/v1", model: "controlled-model", apiKey: "test-secret" },
+      pendingSelection: "She took off her coat and wore her coat."
+    }));
+  });
+}
+
+test("выделенный текст переводится автоматически; исправление заменяет результат и показывает ошибку", async ({ page, request }) => {
+  await prepareAutomaticTranslation(page);
+  await page.goto("/src/panel.html");
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+  await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
+  await request.post("/__test/error");
+  await page.locator("#source-text").fill("Corrected text");
+  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await expect(page.locator("#result")).toBeHidden();
+  await expect(page.locator("#error")).toContainText("API вернул ошибку 401");
+});
+
+test("новое выделение заменяет запрос; запоздалый ответ не подменяет актуальный перевод", async ({ page }) => {
+  await prepareAutomaticTranslation(page);
+  let finishFirst;
+  let firstStarted;
+  const started = new Promise((resolve) => { firstStarted = resolve; });
+  await page.route("**/v1/chat/completions", async (route) => {
+    const text = route.request().postDataJSON().messages[1].content;
+    if (text.startsWith("She")) {
+      firstStarted();
+      await new Promise((resolve) => { finishFirst = resolve; });
+    }
+    await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ sentence_translation: text.startsWith("She") ? "Старый результат" : "Актуальный результат", words: [] }) } }] } });
+  });
+  await page.goto("/src/panel.html");
+  await started;
+  await expect(page.getByRole("button", { name: "Переводим…" })).toBeVisible();
+  await page.evaluate(() => chrome.storage.local.set({ pendingSelection: "New text" }));
+  await expect(page.locator("#sentence-translation")).toHaveText("Актуальный результат");
+  await page.locator("#source-text").fill("Edited text");
+  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await expect(page.locator("#sentence-translation")).toHaveText("Актуальный результат");
+  const oldResponse = page.waitForResponse((response) => response.request().postDataJSON()?.messages?.[1]?.content.startsWith("She"));
+  finishFirst();
+  await (await oldResponse).finished();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.locator("#source-text")).toHaveValue("Edited text");
+  await expect(page.locator("#sentence-translation")).toHaveText("Актуальный результат");
 });

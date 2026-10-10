@@ -52,7 +52,8 @@ function showAnswer() {
   $("show-answer").hidden = true;
 }
 
-export function setupReview(onReview) {
+export function setupReview(onReview = async () => {}) {
+  if (!$("review")) return;
   void renderStudyStats();
   void dailyLimit().then((limit) => { $("new-card-limit").value = limit; }).catch((error) => {
     $("review-settings-status").textContent = `Не удалось загрузить лимит: ${error.message}`;
