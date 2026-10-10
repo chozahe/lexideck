@@ -140,27 +140,48 @@ async function extractComicText(image) {
   return dialogues.join("\n");
 }
 
-async function handleComicImage(image) {
-  $("comic-status").textContent = "Распознаём текст на изображении…";
-  showError("");
-  try {
-    $("source-text").value = await extractComicText(image);
+let comicRequestId;
+let comicRequestToken;
+let handledComicRequestId;
+
+async function consumePendingComic(request) {
+  if (!request) return;
+  if (comicRequestId !== request.id) {
+    comicRequestId = request.id;
+    comicRequestToken = ++translationRequest;
+    $("source-text").value = "";
     $("result").hidden = true;
-    $("comic-status").textContent = "Проверьте и при необходимости исправьте реплики, затем подтвердите текст кнопкой ниже.";
+    $("expression-form").hidden = true;
+    $("translate").textContent = "Перевести";
+    showError("");
+  }
+  const token = comicRequestToken;
+  if (token !== translationRequest) return;
+  if (request.state === "capturing") {
+    $("comic-status").textContent = "Обрабатываем выбранную область…";
+    return;
+  }
+  if (handledComicRequestId === request.id) return;
+  handledComicRequestId = request.id;
+  await chrome.storage.session.remove("pendingComicRequest");
+  if (token !== translationRequest) return;
+  if (request.state === "error") {
+    $("comic-status").textContent = "";
+    showError(request.error);
+    return;
+  }
+  if (request.state !== "image") return;
+  $("comic-status").textContent = "Распознаём текст на изображении…";
+  try {
+    const text = await extractComicText(request.image);
+    if (token !== translationRequest) return;
+    $("source-text").value = text;
+    $("comic-status").textContent = "";
+    await runTranslation(token);
   } catch (error) {
+    if (token !== translationRequest) return;
     $("comic-status").textContent = "";
     showError(error.message || "Не удалось распознать текст на изображении.");
-  }
-}
-
-async function consumePendingComic({ pendingComicImage, pendingComicError }) {
-  if (pendingComicImage) {
-    await chrome.storage.session.remove("pendingComicImage");
-    await handleComicImage(pendingComicImage);
-  }
-  if (pendingComicError) {
-    showError(pendingComicError);
-    await chrome.storage.session.remove("pendingComicError");
   }
 }
 
@@ -347,10 +368,11 @@ function renderResult(result, sourceText) {
 
 let translationRequest = 0;
 
-async function runTranslation() {
+async function runTranslation(existingRequest) {
   const text = $("source-text").value.trim();
   if (!text) return showError("Введите текст или выберите его на странице.");
-  const request = ++translationRequest;
+  const request = existingRequest ?? ++translationRequest;
+  $("comic-status").textContent = "";
   showError("");
   $("result").hidden = true;
   $("expression-form").hidden = true;
@@ -407,11 +429,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     void chrome.storage.local.remove("pendingSelection");
     void runTranslation();
   }
-  if (areaName === "session") {
-    void consumePendingComic({
-      pendingComicImage: changes.pendingComicImage?.newValue,
-      pendingComicError: changes.pendingComicError?.newValue
-    });
+  if (areaName === "session" && changes.pendingComicRequest?.newValue) {
+    void consumePendingComic(changes.pendingComicRequest.newValue);
   }
 });
 
@@ -425,6 +444,6 @@ void (async () => {
     await chrome.storage.local.remove("pendingSelection");
     void runTranslation();
   }
-  const comicState = await chrome.storage.session.get(["pendingComicImage", "pendingComicError"]);
-  await consumePendingComic(comicState);
+  const { pendingComicRequest } = await chrome.storage.session.get("pendingComicRequest");
+  await consumePendingComic(pendingComicRequest);
 })().catch((error) => showError(`Не удалось загрузить панель: ${error.message}`));
