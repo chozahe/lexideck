@@ -100,6 +100,8 @@ function showAnswer() {
   }
   $("review-answer").hidden = false;
   $("show-answer").hidden = true;
+  $("review-status").textContent = "Ответ открыт. Оцените, насколько хорошо вы вспомнили значение.";
+  $("review-answer").focus();
 }
 
 export function setupReview(onReview = async () => {}) {
@@ -107,7 +109,10 @@ export function setupReview(onReview = async () => {}) {
   void renderStudyStats();
   $("start-review").addEventListener("click", () => {
     $("start-review").disabled = true;
-    void startSession().catch((error) => { $("review-status").textContent = error.message; }).finally(() => {
+    void startSession().then(() => {
+      if (currentCard) $("show-answer").focus();
+      else $("review-status").focus();
+    }).catch((error) => { $("review-status").textContent = error.message; $("review-status").focus(); }).finally(() => {
       $("start-review").disabled = saving;
     });
   });
@@ -145,6 +150,8 @@ export function setupReview(onReview = async () => {}) {
         await renderStudyStats();
         await onReview();
         await nextCard();
+        if (currentCard) $("show-answer").focus();
+        else $("review-status").focus();
       } catch (error) {
         if (queueChanged) {
           sessionQueue.splice(sessionCompleted, 1);
@@ -152,6 +159,7 @@ export function setupReview(onReview = async () => {}) {
           await nextCard();
           $("review-status").textContent = `${error.message} ${$("review-status").textContent}`;
         } else $("review-status").textContent = `Не удалось сохранить ответ: ${error.message}`;
+        if (!queueChanged) button.focus();
       } finally {
         saving = false;
         $("start-review").disabled = false;

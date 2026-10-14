@@ -16,6 +16,38 @@ test("панель открывает отдельную вкладку сраз
   await expect(reviewTab.getByRole("button", { name: "Начать занятие" })).toBeVisible();
 });
 
+test("клавиатурный цикл сохраняет фокус на ответе, следующей карточке и итоге", async ({ page }) => {
+  await page.goto("/src/review.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: ["one", "two"].map((headword) => ({
+    id: headword, kind: "word", headword,
+    meanings: [{ text: `значение ${headword}`, contexts: [{ form: headword, text: `Контекст ${headword}.` }], examples: [] }]
+  })) }));
+  await page.reload();
+  const show = page.getByRole("button", { name: "Показать ответ" });
+  await page.getByRole("button", { name: "Начать занятие" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(show).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#review-answer")).toBeFocused();
+  await expect(page.locator("#review-status")).toHaveText("Ответ открыт. Оцените, насколько хорошо вы вспомнили значение.");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Не вспомнил", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await expect(show).toBeFocused();
+  await expect(page.locator("#review-headword")).toHaveText("two");
+  await expect(page.locator("#review-answer")).toBeHidden();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#review-answer")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#review-status")).toBeFocused();
+  await expect(page.locator("#review-status")).toHaveText("Занятие завершено: все карточки пройдены.");
+});
+
 test("оценка карточки обновляет серию и достижения, а пропуск дня сбрасывает серию", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00") });
   await page.goto("/src/review.html");
