@@ -39,3 +39,34 @@ test("навигация страницы содержит повторение,
   await expect(nav.getByRole("link", { name: "Словарь" })).toHaveAttribute("href", "vocabulary.html");
   await expect(nav.getByRole("link", { name: "Настройки" })).toHaveAttribute("aria-current", "page");
 });
+
+test("несохранённые настройки удерживают на странице и сохраняют введённые значения", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  await page.locator("#source-language").fill("Japanese");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("link", { name: "Словарь" }).click();
+  await expect(page).toHaveURL(/settings\.html$/);
+  await expect(page.locator("#source-language")).toHaveValue("Japanese");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("link", { name: "Словарь" }).click();
+  await expect(page).toHaveURL(/vocabulary\.html$/);
+});
+
+test("сохранение снимает предупреждение, а ошибка оставляет форму несохранённой", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  await page.locator("#target-language").fill("German");
+  await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await expect(page.locator("#settings-status")).toHaveText("Настройки сохранены на этом устройстве.");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("link", { name: "Словарь" }).click();
+  await expect(page).toHaveURL(/vocabulary\.html$/);
+
+  await page.goto("/src/settings.html");
+  await page.evaluate(() => localStorage.setItem("lexideck-test-storage-fail-set", "true"));
+  await page.locator("#target-language").fill("Italian");
+  await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await expect(page.locator("#settings-status")).toContainText("Не удалось сохранить настройки");
+  await expect(page.locator("#target-language")).toHaveValue("Italian");
+  await expect(page.locator("#settings-form")).toHaveAttribute("data-dirty", "true");
+});
