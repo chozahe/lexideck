@@ -13,6 +13,24 @@ let page = 1;
 let expandedIds = new Set();
 const nodes = new Map();
 
+function readUrlState() {
+  const params = new URL(location.href).searchParams;
+  query = normalize(params.get("q") || "");
+  $("vocabulary-search").value = params.get("q") || "";
+  const rawPage = Number(params.get("page") || 1);
+  page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  expandedIds = new Set(params.getAll("open").filter((id) => id.length <= 200));
+}
+
+function writeUrlState(mode = "push") {
+  const url = new URL(location.href);
+  url.search = "";
+  if (query) url.searchParams.set("q", $("vocabulary-search").value.trim());
+  if (page > 1) url.searchParams.set("page", String(page));
+  for (const id of expandedIds) url.searchParams.append("open", id);
+  history[mode === "replace" ? "replaceState" : "pushState"]({}, "", url);
+}
+
 function cardText(card) {
   return normalize([card.headword, ...card.meanings.map((meaning) => meaning.text)].join(" "));
 }
@@ -124,6 +142,11 @@ function makeNode(card) {
       if (latest) renderDetails(content, latest);
     } else expandedIds.delete(details.dataset.cardId);
   });
+  summary.addEventListener("click", () => {
+    if (details.open) expandedIds.delete(card.id);
+    else expandedIds.add(card.id);
+    writeUrlState("push");
+  });
   const record = { details, headword, status, content, signature: "" };
   updateNode(card, record);
   nodes.set(card.id, record);
@@ -154,6 +177,7 @@ function renderVocabulary() {
   const container = $("vocabulary-cards");
   const activeCard = document.activeElement?.closest?.(".vocabulary-card")?.dataset.cardId;
   const pageIds = new Set(pageCards.map((card) => card.id));
+  for (const id of [...expandedIds]) if (!snapshot.some((card) => card.id === id)) expandedIds.delete(id);
 
   for (const child of [...container.children]) {
     if (!pageIds.has(child.dataset.cardId)) child.remove();
@@ -180,6 +204,7 @@ function renderVocabulary() {
   $("vocabulary-page-status").textContent = `${page} / ${pageCount} · карточек: ${results.length}`;
   $("vocabulary-previous").disabled = page <= 1;
   $("vocabulary-next").disabled = page >= pageCount;
+  writeUrlState("replace");
   if (activeCard && !pageIds.has(activeCard)) {
     const replacement = pageCards[Math.min((results.findIndex((entry) => entry.card.id === activeCard) % PAGE_SIZE + PAGE_SIZE) % PAGE_SIZE, pageCards.length - 1)];
     (replacement && nodes.get(replacement.id)?.details.querySelector("summary") || $("vocabulary-search")).focus();
@@ -190,6 +215,7 @@ async function loadSnapshot() {
   const { cards = [] } = await chrome.storage.local.get("cards");
   snapshot = Array.isArray(cards) ? cards : [];
   index = snapshot.map((card) => ({ card, text: cardText(card) }));
+  for (const id of [...expandedIds]) if (!snapshot.some((card) => card.id === id)) expandedIds.delete(id);
   renderVocabulary();
 }
 
@@ -215,10 +241,11 @@ async function importBackup(file) {
 $("vocabulary-search").addEventListener("input", () => {
   query = normalize($("vocabulary-search").value);
   page = 1;
+  writeUrlState("replace");
   renderVocabulary();
 });
-$("vocabulary-previous").addEventListener("click", () => { page -= 1; renderVocabulary(); });
-$("vocabulary-next").addEventListener("click", () => { page += 1; renderVocabulary(); });
+$("vocabulary-previous").addEventListener("click", () => { page -= 1; writeUrlState(); renderVocabulary(); });
+$("vocabulary-next").addEventListener("click", () => { page += 1; writeUrlState(); renderVocabulary(); });
 $("export-backup").addEventListener("click", () => {
   void exportBackup().catch((error) => { $("backup-status").textContent = `Не удалось экспортировать словарь: ${error.message}`; });
 });
@@ -248,4 +275,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   $("vocabulary-status").textContent = "Словарь обновлён в другом окне.";
 });
 
+readUrlState();
+window.addEventListener("popstate", () => {
+  readUrlState();
+  renderVocabulary();
+});
 void loadSnapshot().catch((error) => { $("vocabulary-status").textContent = `Не удалось загрузить словарь: ${error.message}`; });

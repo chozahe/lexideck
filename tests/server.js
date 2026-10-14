@@ -102,7 +102,8 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  const requested = request.url === "/" ? "/src/panel.html" : request.url;
+  const requestPath = new URL(request.url, "http://127.0.0.1").pathname;
+  const requested = requestPath === "/" ? "/src/panel.html" : requestPath;
   const filePath = path.resolve(root, `.${decodeURIComponent(requested)}`);
   if (!filePath.startsWith(`${root}${path.sep}`)) {
     response.writeHead(403).end();

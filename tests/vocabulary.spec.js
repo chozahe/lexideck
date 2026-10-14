@@ -161,3 +161,44 @@ test("изменение другой вкладкой сохраняет рас
   await expect(beta).toHaveAttribute("open", "");
   await expect(page.locator("#vocabulary-status")).toContainText("другом окне");
 });
+
+test("URL сохраняет поиск, страницу и раскрытие, а Back/Forward восстанавливает состояние", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: Array.from({ length: 120 }, (_, i) => ({
+    id: `card-${i}`, kind: "word", headword: `word-${String(i).padStart(3, "0")}`,
+    meanings: [{ text: `meaning-${i}`, contexts: [], examples: [] }]
+  })) }));
+  await page.goto(`${page.url().split("?")[0]}?q=word&page=2&open=card-65&api_key=secret&source=private`);
+  await expect(page.locator("#vocabulary-search")).toHaveValue("word");
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("2 / 3 · карточек: 120");
+  await expect(page.locator('[data-card-id="card-65"]')).toHaveAttribute("open", "");
+  await expect(page).not.toHaveURL(/api_key|source=private/);
+  await page.reload();
+  await expect(page.locator('[data-card-id="card-65"]')).toHaveAttribute("open", "");
+  await page.getByRole("button", { name: "Вперёд" }).click();
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("3 / 3 · карточек: 120");
+  await page.goBack();
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("2 / 3 · карточек: 120");
+  await expect(page.locator('[data-card-id="card-65"]')).toHaveAttribute("open", "");
+  await page.goForward();
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("3 / 3 · карточек: 120");
+  await page.getByLabel("Поиск по основной форме или значению").fill("word-001");
+  await expect(page.locator("#vocabulary-cards summary")).toContainText("word-001");
+  await expect(page).toHaveURL(/q=word-001/);
+  await page.goBack();
+  await expect(page.locator("#vocabulary-search")).toHaveValue("word");
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("2 / 3 · карточек: 120");
+});
+
+test("некорректные страницы и удалённые id раскрытия восстанавливаются безопасно", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [
+    { id: "available", kind: "word", headword: "available", meanings: [{ text: "present", contexts: [], examples: [] }] }
+  ] }));
+  await page.goto(`${page.url().split("?")[0]}?page=-4&open=deleted&open=available`);
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("1 / 1 · карточек: 1");
+  await expect(page.locator("#vocabulary-cards details")).toHaveAttribute("open", "");
+  await expect(page).not.toHaveURL(/page=|open=deleted/);
+  await page.getByLabel("Поиск по основной форме или значению").fill("ничего");
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("1 / 1 · карточек: 0");
+});
