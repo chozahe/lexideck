@@ -134,6 +134,26 @@ test("оценка карточки обновляет серию и дости�
   expect(studyStats.reviewCount).toBe(1);
 });
 
+test("счётчик серии использует русские формы для нуля, границ и чисел больше ста", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-09T12:00:00") });
+  await page.goto("/src/review.html");
+  const expected = new Map([[0, "0 дней"], [1, "1 день"], [2, "2 дня"], [4, "4 дня"], [5, "5 дней"],
+    [11, "11 дней"], [12, "12 дней"], [14, "14 дней"], [21, "21 день"], [22, "22 дня"], [25, "25 дней"], [101, "101 день"], [111, "111 дней"]]);
+  for (const [count, phrase] of expected) {
+    await page.evaluate(async (length) => {
+      const days = [];
+      const date = new Date();
+      for (let index = 0; index < length; index++) {
+        days.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+        date.setDate(date.getDate() - 1);
+      }
+      await chrome.storage.local.set({ studyStats: { days, reviewCount: 0 } });
+    }, count);
+    await page.reload();
+    await expect(page.locator("#study-streak")).toHaveText(`Серия занятий: ${phrase}`);
+  }
+});
+
 test("дневной лимит новых карточек равен 10, меняется и сохраняется между занятиями", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
   await page.goto("/src/settings.html");

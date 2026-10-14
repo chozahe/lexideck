@@ -47,7 +47,10 @@ export async function recordStudyReview() {
 export async function renderStudyStats() {
   const { studyStats = { days: [], reviewCount: 0 } } = await chrome.storage.local.get("studyStats");
   const streak = currentStreak(studyStats.days);
-  document.getElementById("study-streak").textContent = `Серия занятий: ${streak} ${streak === 1 ? "день" : streak >= 2 && streak <= 4 ? "дня" : "дней"}`;
+  const dayForms = { one: "день", few: "дня", many: "дней", other: "дня" };
+  const dayForm = dayForms[new Intl.PluralRules("ru-RU").select(streak)];
+  const formattedStreak = new Intl.NumberFormat("ru-RU").format(streak);
+  document.getElementById("study-streak").textContent = `Серия занятий: ${formattedStreak} ${dayForm}`;
   const achievements = [
     { title: "Первый ответ", earned: studyStats.reviewCount >= 1 },
     { title: "10 оценок карточек", earned: studyStats.reviewCount >= 10 },
