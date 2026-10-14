@@ -344,7 +344,7 @@ test("перевод завершается понятной ошибкой по
   release();
 });
 
-test("область комикса распознаётся vision-моделью, текст можно исправить и перевести", async ({ page, request }) => {
+test("реплики комикса можно проверить и исправить до перевода", async ({ page, request }) => {
   const crop = await selectComicRegion(page);
   expect(crop.width).toBe(80);
   expect(crop.height).toBe(70);
@@ -355,19 +355,20 @@ test("область комикса распознаётся vision-модель
   await page.evaluate((image) => window.chrome.storage.session.set({ pendingComicRequest: { id: "comic-1", state: "image", image } }), selectedCrop);
 
   await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
-  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+  await expect(page.locator("#confirm-comic")).toBeVisible();
+  await expect(page.locator("#comic-status")).toContainText("Проверьте распознанные реплики");
+  expect((await (await request.get("/__test/requests")).json())).toHaveLength(1);
   await page.locator("#source-text").fill("She took off her coat and wore her coat!");
-  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await page.getByRole("button", { name: "Подтвердить текст и перевести" }).click();
 
   await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
   const calls = await (await request.get("/__test/requests")).json();
-  expect(calls).toHaveLength(3);
+  expect(calls).toHaveLength(2);
   expect(calls[0].body.messages[1].content).toEqual([
     { type: "text", text: "Извлеки текст из выбранного фрагмента комикса." },
     { type: "image_url", image_url: { url: selectedCrop } }
   ]);
-  expect(calls[1].body.messages[1].content).toBe("She took off her coat and wore her coat.");
-  expect(calls[2].body.messages[1].content).toBe("She took off her coat and wore her coat!");
+  expect(calls[1].body.messages[1].content).toBe("She took off her coat and wore her coat!");
   expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicRequest");
 });
 
@@ -475,9 +476,9 @@ test("новый текст и новая область заменяют зап
   await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New text");
   await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("new-image"));
   await expect(page.locator("#source-text")).toHaveValue("New dialogue");
-  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New dialogue");
+  await expect(page.locator("#confirm-comic")).toBeVisible();
   finishOldVision();
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(page.locator("#source-text")).toHaveValue("New dialogue");
-  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: New dialogue");
+  await expect(page.locator("#confirm-comic")).toBeVisible();
 });

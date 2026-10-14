@@ -64,6 +64,13 @@ async function cropVisibleTab(screenshot, rect, viewport) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "LEXIDECK_RESELECT_COMIC") {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, ([tab]) => {
+      if (tab?.id != null) chrome.tabs.sendMessage(tab.id, { type: "LEXIDECK_START_REGION_SELECTION" });
+    });
+    sendResponse({ ok: true });
+    return;
+  }
   if (message.type !== "LEXIDECK_REGION_SELECTED" || sender.tab?.windowId == null) return;
   const id = crypto.randomUUID();
   currentComicRequest = id;

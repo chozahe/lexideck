@@ -202,6 +202,9 @@ async function consumePendingComic(request) {
     $("result").hidden = true;
     $("expression-form").hidden = true;
     $("translate").textContent = "Перевести";
+    $("translate").hidden = false;
+    $("confirm-comic").hidden = true;
+    $("retry-comic").hidden = true;
     showError("");
   }
   const token = comicRequestToken;
@@ -230,8 +233,10 @@ async function consumePendingComic(request) {
     if (translationController === visionController) translationController = undefined;
     $("cancel-translation").hidden = true;
     $("source-text").value = text;
-    $("comic-status").textContent = "";
-    await runTranslation(token);
+    $("comic-status").textContent = "Проверьте распознанные реплики, исправьте ошибки и подтвердите перевод.";
+    $("translate").hidden = true;
+    $("confirm-comic").hidden = false;
+    $("retry-comic").hidden = false;
   } catch (error) {
     if (token !== translationRequest) return;
     $("cancel-translation").hidden = true;
@@ -461,11 +466,27 @@ async function runTranslation(existingRequest) {
 }
 
 $("translate").addEventListener("click", () => void runTranslation());
+$("confirm-comic").addEventListener("click", () => {
+  $("confirm-comic").hidden = true;
+  $("retry-comic").hidden = true;
+  $("translate").hidden = false;
+  void runTranslation();
+});
+$("retry-comic").addEventListener("click", async () => {
+  $("confirm-comic").hidden = true;
+  $("retry-comic").hidden = true;
+  $("translate").hidden = false;
+  $("comic-status").textContent = "Выберите область комикса на странице.";
+  await chrome.runtime.sendMessage({ type: "LEXIDECK_RESELECT_COMIC" });
+});
 $("cancel-translation").addEventListener("click", () => {
   ++translationRequest;
   translationController?.abort();
   activeTranslation = undefined;
   $("translate").textContent = "Перевести";
+  $("translate").hidden = false;
+  $("confirm-comic").hidden = true;
+  $("retry-comic").hidden = true;
   $("cancel-translation").hidden = true;
   $("comic-status").textContent = "Запрос отменён.";
 });
