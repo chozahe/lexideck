@@ -68,8 +68,14 @@ test("поиск находит основную форму и значение,
   await expect(cards).toHaveCount(2);
   const firstSummary = cards.nth(0).locator("summary");
   await firstSummary.focus();
+  await expect(firstSummary).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(cards.nth(0)).toHaveAttribute("open", "");
+  await page.keyboard.press("Space");
+  await expect(cards.nth(0)).not.toHaveAttribute("open", "");
   await page.keyboard.press("Enter");
   await expect(cards.nth(0).locator(".vocabulary-meaning h3")).toBeVisible();
+  await expect(cards.nth(0)).toHaveAttribute("open", "");
   await expect(cards.nth(0)).toContainText("снять одежду");
   await expect(cards.nth(0)).toContainText("took off: She took off her coat.");
   await expect(cards.nth(0)).toContainText("She took off her shoes.");
