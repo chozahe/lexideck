@@ -1,5 +1,5 @@
 import "./theme.js";
-import { DEFAULT_SETTINGS } from "./settings.js";
+import { completionEndpoint, DEFAULT_SETTINGS } from "./settings.js";
 
 const $ = (id) => document.getElementById(id);
 const form = $("settings-form");
@@ -10,9 +10,11 @@ const fields = {
   model: $("model"),
   apiKey: $("api-key")
 };
+const apiFields = [fields.apiUrl, fields.model, fields.apiKey];
 const limitInput = $("new-card-limit");
 let savedSnapshot = null;
 let allowNavigation = false;
+let apiTestSnapshot = null;
 
 function currentSnapshot() {
   return JSON.stringify({
@@ -33,6 +35,129 @@ for (const input of [...Object.values(fields), limitInput]) {
   input.addEventListener("input", updateDirtyState);
   input.addEventListener("change", updateDirtyState);
 }
+
+function apiSnapshot() {
+  return JSON.stringify(apiFields.map((input) => input.value.trim()));
+}
+
+function updateApiReadiness() {
+  const url = fields.apiUrl.value.trim();
+  const model = fields.model.value.trim();
+  const key = fields.apiKey.value.trim();
+  let urlIsValid = !url;
+  const urlError = $("api-url-error");
+  if (url) {
+    try {
+      new URL(completionEndpoint(url));
+      urlIsValid = true;
+      fields.apiUrl.removeAttribute("aria-invalid");
+      urlError.textContent = "";
+    } catch {
+      urlError.textContent = "Укажите полный http:// или https:// адрес сервиса либо endpoint /chat/completions.";
+      fields.apiUrl.setAttribute("aria-invalid", "true");
+    }
+  }
+  const missing = [];
+  if (!url || !urlIsValid) missing.push("корректный URL API");
+  if (!model) missing.push("модель");
+  if (!key) missing.push("ключ");
+  const ready = $("api-readiness");
+  const nextStep = $("api-next-step");
+  if (missing.length) {
+    ready.textContent = `Перевод ещё не настроен. Не заполнено: ${missing.join(", ")}.`;
+    nextStep.textContent = "Заполните указанные поля подключения. Повторение и локальные настройки доступны без API.";
+  } else {
+    const saved = savedSnapshot !== null && currentSnapshot() === savedSnapshot;
+    ready.textContent = saved
+      ? "Параметры подключения заполнены и сохранены. Проверьте подключение перед первым переводом."
+      : "Поля подключения заполнены, но ещё не сохранены. Проверка использует черновые значения формы.";
+    nextStep.textContent = saved
+      ? "Проверка отправит короткий текстовый запрос. Для анализа комиксов выбранная модель должна поддерживать изображения."
+      : "Проверьте подключение, затем сохраните настройки. Повторение и локальные настройки доступны без API.";
+  }
+  if (apiTestSnapshot !== null && apiTestSnapshot !== apiSnapshot()) {
+    apiTestSnapshot = null;
+    $("api-test-status").textContent = "Параметры подключения изменились. Проверьте подключение ещё раз.";
+    $("api-test-status").dataset.state = "";
+  }
+}
+
+for (const input of apiFields) input.addEventListener("input", () => {
+  const errorId = { "api-url": "api-url-error", model: "model-error", "api-key": "api-key-error" }[input.id];
+  $(errorId).textContent = "";
+  input.removeAttribute("aria-invalid");
+  updateApiReadiness();
+});
+
+$("test-api").addEventListener("click", async () => {
+  const status = $("api-test-status");
+  const errors = {
+    apiUrl: $("api-url-error"),
+    model: $("model-error"),
+    apiKey: $("api-key-error")
+  };
+  for (const error of Object.values(errors)) error.textContent = "";
+  for (const input of apiFields) input.removeAttribute("aria-invalid");
+  const url = fields.apiUrl.value.trim();
+  const model = fields.model.value.trim();
+  const key = fields.apiKey.value.trim();
+  let endpoint;
+  try {
+    if (!url) throw new Error("Введите URL сервиса.");
+    endpoint = completionEndpoint(url);
+    new URL(endpoint);
+  } catch (error) {
+    endpoint = undefined;
+    errors.apiUrl.textContent = `${error.message} Допустимы адреса http:// и https://.`;
+    fields.apiUrl.setAttribute("aria-invalid", "true");
+  }
+  if (!model) {
+    errors.model.textContent = "Введите идентификатор модели, который выдал API-сервис.";
+    fields.model.setAttribute("aria-invalid", "true");
+  }
+  if (!key) {
+    errors.apiKey.textContent = "Введите ключ API из настроек вашего сервиса.";
+    fields.apiKey.setAttribute("aria-invalid", "true");
+  }
+  if (!endpoint || !model || !key) {
+    status.textContent = "Не удалось проверить подключение. Исправьте поля, отмеченные рядом с ними.";
+    status.dataset.state = "error";
+    return;
+  }
+
+  const button = $("test-api");
+  button.disabled = true;
+  status.textContent = "Проверяем текстовый запрос к API…";
+  status.dataset.state = "pending";
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        messages: [{ role: "user", content: "Ответь одним словом: OK" }]
+      })
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 300);
+      throw new Error(`Сервис вернул ошибку ${response.status}${detail ? `: ${detail}` : "."}`);
+    }
+    const payload = await response.json();
+    if (typeof payload.choices?.[0]?.message?.content !== "string") {
+      throw new Error("Ответ сервиса не содержит текст завершения.");
+    }
+    apiTestSnapshot = apiSnapshot();
+    status.textContent = "Текстовый запрос выполнен успешно. Поддержка изображений этой проверкой не подтверждена.";
+    status.dataset.state = "success";
+  } catch (error) {
+    apiTestSnapshot = null;
+    status.textContent = `Проверка не пройдена: ${error.message}`;
+    status.dataset.state = "error";
+  } finally {
+    button.disabled = false;
+  }
+});
 
 window.addEventListener("beforeunload", (event) => {
   if (allowNavigation || !isDirty()) return;
@@ -58,6 +183,7 @@ async function loadSettings() {
   limitInput.value = newCardLimit;
   savedSnapshot = currentSnapshot();
   updateDirtyState();
+  updateApiReadiness();
 }
 
 form.addEventListener("submit", async (event) => {
@@ -75,6 +201,7 @@ form.addEventListener("submit", async (event) => {
     await chrome.storage.local.set({ settings, newCardLimit: limit });
     savedSnapshot = currentSnapshot();
     updateDirtyState();
+    updateApiReadiness();
     status.textContent = "Настройки сохранены на этом устройстве.";
   } catch (error) {
     status.textContent = `Не удалось сохранить настройки: ${error.message}`;

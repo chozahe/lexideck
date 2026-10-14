@@ -95,6 +95,10 @@ section > button { width: 100%; margin-top: 8px; }
 .subtle { color: var(--subtext); background: transparent; text-decoration: underline; border-color: transparent; }
 #error, [role="alert"] { color: var(--red); white-space: pre-wrap; }
 #settings-status, #theme-status { color: var(--green); }
+#api-test-status { color: var(--subtext); }
+#api-test-status[data-state="success"] { color: var(--green); }
+#api-test-status[data-state="error"] { color: var(--red); }
+.field-error { display: block; color: var(--red); overflow-wrap: anywhere; }
 #backup-status, #vocabulary-status, #review-status, #comic-status { color: var(--subtext); }
 #word-meanings { padding-left: 24px; }
 #word-meanings li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; }

@@ -1,5 +1,5 @@
 import "./theme.js";
-import { DEFAULT_SETTINGS } from "./settings.js";
+import { completionEndpoint, DEFAULT_SETTINGS } from "./settings.js";
 import { updateCards } from "./cards.js";
 
 const $ = (id) => document.getElementById(id);
@@ -11,7 +11,7 @@ async function apiCompletion(messages, config) {
   if (!config.apiUrl || !config.apiKey || !config.model) throw new Error("Заполните URL API, ключ и модель в настройках.");
   let response;
   try {
-    response = await fetch(completionUrl(config.apiUrl), {
+    response = await fetch(completionEndpoint(config.apiUrl), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + config.apiKey },
       body: JSON.stringify({ model: config.model, temperature: 0.2, response_format: { type: "json_object" }, messages })
@@ -62,12 +62,6 @@ function parseCompletion(content, sourceText) {
   result.words = result.words
     .sort((left, right) => left.start - right.start);
   return result;
-}
-
-function completionUrl(baseUrl) {
-  const url = baseUrl.trim().replace(/\/+$/, "");
-  if (!/^https?:\/\//i.test(url)) throw new Error("Укажите корректный URL API, начинающийся с https:// или http://.");
-  return url.endsWith("/chat/completions") ? url : `${url}/chat/completions`;
 }
 
 async function translate(text) {

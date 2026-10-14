@@ -110,7 +110,7 @@ test("системная палитра видна до JavaScript без всп
     const context = await browser.newContext({ javaScriptEnabled: false, colorScheme });
     try {
       const page = await context.newPage();
-      await page.goto("http://127.0.0.1:4173/src/panel.html");
+      await page.goto("/src/panel.html");
       await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.+/);
       await expect(page.locator("body")).toHaveCSS("background-color", background);
       await expect(page.locator("body")).toHaveCSS("color", text);

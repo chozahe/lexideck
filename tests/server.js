@@ -88,7 +88,7 @@ const server = http.createServer((request, response) => {
     let raw = "";
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
-      lastRequest = { headers: request.headers, body: JSON.parse(raw) };
+      lastRequest = { url: request.url, headers: request.headers, body: JSON.parse(raw) };
       apiRequests.push(lastRequest);
       const isVision = Array.isArray(lastRequest.body.messages?.[1]?.content);
       const isExpressionExamples = lastRequest.body.messages?.[0]?.content.includes("Сгенерируй два дополнительных примера");

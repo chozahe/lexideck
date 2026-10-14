@@ -97,7 +97,7 @@ test("дневной лимит новых карточек равен 10, ме�
 
 async function saveTranslatedWords(page) {
   await page.goto("/src/settings.html");
-  await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
+  await page.locator("#api-url").fill(new URL("/v1", page.url()).origin + "/v1");
   await page.locator("#model").fill("controlled-model");
   await page.locator("#api-key").fill("test-secret");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
