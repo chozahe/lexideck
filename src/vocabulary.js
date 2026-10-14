@@ -4,11 +4,17 @@ import { DEFAULT_SETTINGS } from "./settings.js";
 import { updateCards } from "./cards.js";
 
 const $ = (id) => document.getElementById(id);
-const normalize = (value) => value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+const PAGE_SIZE = 50;
+const normalize = (value) => String(value ?? "").trim().toLocaleLowerCase().replace(/\s+/g, " ");
+let snapshot = [];
+let index = [];
+let query = "";
+let page = 1;
+let expandedIds = new Set();
+const nodes = new Map();
 
-function cardMatches(card, query) {
-  const text = [card.headword, ...card.meanings.map((meaning) => meaning.text)];
-  return text.some((value) => normalize(value).includes(query));
+function cardText(card) {
+  return normalize([card.headword, ...card.meanings.map((meaning) => meaning.text)].join(" "));
 }
 
 function appendList(parent, title, values, format = (value) => value) {
@@ -24,27 +30,8 @@ function appendList(parent, title, values, format = (value) => value) {
   parent.append(heading, list);
 }
 
-function renderCard(card, expanded) {
-  const details = document.createElement("details");
-  details.className = "vocabulary-card";
-  details.dataset.cardId = card.id;
-  details.open = expanded;
-
-  const summary = document.createElement("summary");
-  const headword = document.createElement("strong");
-  headword.textContent = card.headword;
-  const status = document.createElement("span");
-  if (card.schedule?.due) {
-    const due = document.createElement("time");
-    due.dateTime = card.schedule.due;
-    due.textContent = new Date(card.schedule.due).toLocaleString("ru-RU");
-    status.append("Следующее повторение: ", due);
-  } else {
-    status.textContent = "Новая карточка";
-  }
-  summary.append(headword, document.createTextNode(" — "), status);
-  details.append(summary);
-
+function renderDetails(container, card) {
+  const fragment = document.createDocumentFragment();
   for (const meaning of card.meanings) {
     const section = document.createElement("section");
     section.className = "vocabulary-meaning";
@@ -60,9 +47,9 @@ function renderCard(card, expanded) {
       addExamples.addEventListener("click", () => void generateExamples(card, meaning, addExamples));
       section.append(addExamples);
     }
-    details.append(section);
+    fragment.append(section);
   }
-  return details;
+  container.replaceChildren(fragment);
 }
 
 async function generateExamples(card, meaning, button) {
@@ -119,15 +106,91 @@ async function generateExamples(card, meaning, button) {
   }
 }
 
-async function renderVocabulary() {
+function makeNode(card) {
+  const details = document.createElement("details");
+  details.className = "vocabulary-card";
+  details.dataset.cardId = card.id;
+  const summary = document.createElement("summary");
+  const headword = document.createElement("strong");
+  const status = document.createElement("span");
+  summary.append(headword, document.createTextNode(" — "), status);
+  const content = document.createElement("div");
+  content.className = "vocabulary-card-details";
+  details.append(summary, content);
+  details.addEventListener("toggle", () => {
+    if (details.open) {
+      expandedIds.add(details.dataset.cardId);
+      const latest = snapshot.find((item) => item.id === details.dataset.cardId);
+      if (latest) renderDetails(content, latest);
+    } else expandedIds.delete(details.dataset.cardId);
+  });
+  const record = { details, headword, status, content, signature: "" };
+  updateNode(card, record);
+  nodes.set(card.id, record);
+  return record;
+}
+
+function updateNode(card, record) {
+  const signature = JSON.stringify(card);
+  if (record.signature === signature) return;
+  record.signature = signature;
+  record.details.dataset.cardId = card.id;
+  record.headword.textContent = card.headword;
+  if (card.schedule?.due) {
+    const due = document.createElement("time");
+    due.dateTime = card.schedule.due;
+    due.textContent = new Date(card.schedule.due).toLocaleString("ru-RU");
+    record.status.replaceChildren("Следующее повторение: ", due);
+  } else record.status.textContent = "Новая карточка";
+  record.details.open = expandedIds.has(card.id);
+  if (record.details.open) renderDetails(record.content, card);
+}
+
+function renderVocabulary() {
+  const results = index.filter((entry) => !query || entry.text.includes(query));
+  const pageCount = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
+  page = Math.min(Math.max(page, 1), pageCount);
+  const pageCards = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((entry) => entry.card);
+  const container = $("vocabulary-cards");
+  const activeCard = document.activeElement?.closest?.(".vocabulary-card")?.dataset.cardId;
+  const pageIds = new Set(pageCards.map((card) => card.id));
+
+  for (const child of [...container.children]) {
+    if (!pageIds.has(child.dataset.cardId)) child.remove();
+  }
+  pageCards.forEach((card, position) => {
+    let record = nodes.get(card.id);
+    if (!record) record = makeNode(card);
+    else updateNode(card, record);
+    const current = container.children[position];
+    if (current !== record.details) container.insertBefore(record.details, current || null);
+  });
+
+  for (const id of [...nodes.keys()]) {
+    if (!snapshot.some((card) => card.id === id)) {
+      nodes.get(id).details.remove();
+      nodes.delete(id);
+      expandedIds.delete(id);
+    }
+  }
+
+  $("vocabulary-empty").hidden = snapshot.length > 0;
+  $("vocabulary-no-results").hidden = snapshot.length === 0 || results.length > 0;
+  $("vocabulary-pagination").hidden = results.length <= PAGE_SIZE;
+  $("vocabulary-page-status").textContent = `${page} / ${pageCount} · карточек: ${results.length}`;
+  $("vocabulary-previous").disabled = page <= 1;
+  $("vocabulary-next").disabled = page >= pageCount;
+  if (activeCard && !pageIds.has(activeCard)) {
+    const replacement = pageCards[Math.min((results.findIndex((entry) => entry.card.id === activeCard) % PAGE_SIZE + PAGE_SIZE) % PAGE_SIZE, pageCards.length - 1)];
+    (replacement && nodes.get(replacement.id)?.details.querySelector("summary") || $("vocabulary-search")).focus();
+  }
+}
+
+async function loadSnapshot() {
   const { cards = [] } = await chrome.storage.local.get("cards");
-  const query = normalize($("vocabulary-search").value);
-  const expanded = new Set([...$("vocabulary-cards").querySelectorAll("details[open]")].map((item) => item.dataset.cardId));
-  const matches = cards.filter((card) => cardMatches(card, query));
-  $("vocabulary-cards").replaceChildren(...matches.map((card) => renderCard(card, expanded.has(card.id))));
-  $("vocabulary-empty").hidden = cards.length > 0;
-  $("vocabulary-no-results").hidden = cards.length === 0 || matches.length > 0;
-  $("vocabulary-status").textContent = "";
+  snapshot = Array.isArray(cards) ? cards : [];
+  index = snapshot.map((card) => ({ card, text: cardText(card) }));
+  renderVocabulary();
 }
 
 async function exportBackup() {
@@ -145,13 +208,17 @@ async function exportBackup() {
 async function importBackup(file) {
   const cards = parseBackup(await file.text());
   await restoreBackup(cards, () => window.confirm(`В резервной копии ${cards.length} карточек. Заменить текущий словарь?`));
-  await renderVocabulary();
+  await loadSnapshot();
   $("backup-status").textContent = `Восстановлено карточек: ${cards.length}.`;
 }
 
 $("vocabulary-search").addEventListener("input", () => {
-  void renderVocabulary().catch((error) => { $("vocabulary-status").textContent = `Не удалось показать словарь: ${error.message}`; });
+  query = normalize($("vocabulary-search").value);
+  page = 1;
+  renderVocabulary();
 });
+$("vocabulary-previous").addEventListener("click", () => { page -= 1; renderVocabulary(); });
+$("vocabulary-next").addEventListener("click", () => { page += 1; renderVocabulary(); });
 $("export-backup").addEventListener("click", () => {
   void exportBackup().catch((error) => { $("backup-status").textContent = `Не удалось экспортировать словарь: ${error.message}`; });
 });
@@ -160,21 +227,25 @@ $("import-backup").addEventListener("change", async (event) => {
   const [file] = input.files;
   if (!file) return;
   $("backup-status").textContent = "Проверяем резервную копию…";
-  try {
-    await importBackup(file);
-  } catch (error) {
-    $("backup-status").textContent = error.message.startsWith("Импорт отменён")
-      ? error.message
-      : `Не удалось импортировать словарь: ${error.message}`;
-  } finally {
-    input.value = "";
-  }
+  try { await importBackup(file); }
+  catch (error) {
+    $("backup-status").textContent = error.message.startsWith("Импорт отменён") ? error.message : `Не удалось импортировать словарь: ${error.message}`;
+  } finally { input.value = ""; }
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "local" && changes.cards) {
-    void renderVocabulary().catch((error) => { $("vocabulary-status").textContent = `Не удалось обновить словарь: ${error.message}`; });
+  if (areaName !== "local" || !changes.cards) return;
+  const activeId = document.activeElement?.closest?.(".vocabulary-card")?.dataset.cardId;
+  const oldCards = new Map(snapshot.map((card) => [card.id, card]));
+  snapshot = Array.isArray(changes.cards.newValue) ? changes.cards.newValue : [];
+  index = snapshot.map((card) => ({ card, text: cardText(card) }));
+  if (activeId && !snapshot.some((card) => card.id === activeId)) {
+    $("vocabulary-status").textContent = "Карточка изменилась в другом окне.";
   }
+  // Поддерживаем ссылки на неизменившиеся записи; updateNode сравнит только карточки текущей страницы.
+  for (const card of snapshot) if (oldCards.get(card.id) === card) nodes.get(card.id)?.details.setAttribute("data-current", "true");
+  renderVocabulary();
+  $("vocabulary-status").textContent = "Словарь обновлён в другом окне.";
 });
 
-void renderVocabulary().catch((error) => { $("vocabulary-status").textContent = `Не удалось загрузить словарь: ${error.message}`; });
+void loadSnapshot().catch((error) => { $("vocabulary-status").textContent = `Не удалось загрузить словарь: ${error.message}`; });

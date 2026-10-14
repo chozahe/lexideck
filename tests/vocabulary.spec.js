@@ -109,3 +109,55 @@ test("карточка, сохранённая в панели, появляет
   await expect(vocabulary.locator("#vocabulary-empty")).toBeHidden();
   await expect(vocabulary.locator("#vocabulary-cards .vocabulary-meaning h3")).toBeHidden();
 });
+
+test("1000 карточек индексируются целиком и просматриваются страницами по 50", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => {
+    const cards = Array.from({ length: 1000 }, (_, i) => ({
+      id: `card-${i}`,
+      kind: "word",
+      headword: `word-${String(i).padStart(4, "0")}`,
+      meanings: [{ text: i === 997 ? "needle at the end" : `meaning-${i}`, contexts: [{ form: "form", text: `context-${i}` }], examples: [] }]
+    }));
+    await chrome.storage.local.set({ cards });
+  });
+  const searchStarted = Date.now();
+  await expect(page.locator("#vocabulary-cards details")).toHaveCount(50);
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("1 / 20 · карточек: 1000");
+  await page.getByLabel("Поиск по основной форме или значению").fill("NEEDLE AT THE END");
+  await expect(page.locator("#vocabulary-cards summary")).toContainText("word-0997");
+  const searchMs = Date.now() - searchStarted;
+  await expect(page.locator("#vocabulary-cards .vocabulary-meaning")).toHaveCount(0);
+  await page.getByLabel("Поиск по основной форме или значению").fill("word-099");
+  await page.getByLabel("Поиск по основной форме или значению").fill("word-0999");
+  await expect(page.locator("#vocabulary-cards summary")).toContainText("word-0999");
+  await page.getByLabel("Поиск по основной форме или значению").fill("");
+  for (let n = 0; n < 19; n += 1) await page.getByRole("button", { name: "Вперёд" }).click();
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("20 / 20 · карточек: 1000");
+  const navigationMs = Date.now() - searchStarted - searchMs;
+  await expect(page.locator("#vocabulary-cards summary").first()).toContainText("word-0950");
+  await page.locator("#vocabulary-cards summary").first().click();
+  await expect(page.locator("#vocabulary-cards .vocabulary-meaning h3")).toBeVisible();
+  console.log(`Профиль словаря (1000 карточек): поиск ${searchMs} мс; 19 переходов и раскрытие ${navigationMs} мс; ${await page.evaluate(() => navigator.userAgent)}.`);
+});
+
+test("изменение другой вкладкой сохраняет раскрытие и фокус по id", async ({ page, context }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [
+    { id: "stable-a", kind: "word", headword: "alpha", meanings: [{ text: "first", contexts: [], examples: [] }] },
+    { id: "stable-b", kind: "word", headword: "beta", meanings: [{ text: "second", contexts: [], examples: [] }] }
+  ] }));
+  const beta = page.locator('[data-card-id="stable-b"]');
+  await beta.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  const otherTab = await context.newPage();
+  await otherTab.goto("/src/vocabulary.html");
+  await otherTab.evaluate(async () => {
+    const { cards } = await chrome.storage.local.get("cards");
+    cards[0].meanings[0].text = "updated elsewhere";
+    await chrome.storage.local.set({ cards });
+  });
+  await expect(beta.locator("summary")).toBeFocused();
+  await expect(beta).toHaveAttribute("open", "");
+  await expect(page.locator("#vocabulary-status")).toContainText("другом окне");
+});
