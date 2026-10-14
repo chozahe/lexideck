@@ -48,6 +48,56 @@ test("клавиатурный цикл сохраняет фокус на от�
   await expect(page.locator("#review-status")).toHaveText("Занятие завершено: все карточки пройдены.");
 });
 
+test("preview FSRS не записывает данные и совпадает с сохранённой оценкой в обеих темах", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
+  for (const theme of ["latte", "macchiato"]) {
+    await page.goto("/src/review.html");
+    await page.evaluate(async (selectedTheme) => {
+      await chrome.storage.local.set({ theme: selectedTheme, cards: [{
+        id: "preview", kind: "word", headword: "preview",
+        meanings: [{ text: "значение", contexts: [{ form: "preview", text: "Контекст." }], examples: ["Пример 1.", "Пример 2."] }]
+      }] });
+    }, theme);
+    await page.reload();
+    await page.getByRole("button", { name: "Начать занятие" }).click();
+    await page.getByRole("button", { name: "Показать ответ" }).click();
+    await expect(page.locator("#review-example-details")).toBeVisible();
+    await expect(page.locator("#review-example-details")).not.toHaveAttribute("open", "");
+    await expect(page.locator("#review-examples li")).toHaveCount(2);
+    const previews = await page.locator("#review-ratings .rating-due").allTextContents();
+    expect(previews).toHaveLength(4);
+    expect(previews.every(Boolean)).toBe(true);
+    const before = await page.evaluate(async () => (await chrome.storage.local.get(["cards", "studyStats"])));
+    expect(before.cards[0].schedule).toBeUndefined();
+    expect(before.cards[0].reviewHistory).toBeUndefined();
+    for (const rating of ["Не вспомнил", "Трудно", "Хорошо", "Легко"]) {
+      await expect(page.getByRole("button", { name: rating, exact: true })).toBeInViewport();
+    }
+    await page.getByRole("button", { name: "Хорошо", exact: true }).click();
+    await expect(page.locator("#review-progress")).toHaveText("Пройдено 1 из 1. Осталось 0.");
+    const after = await page.evaluate(async () => (await chrome.storage.local.get(["cards", "studyStats"])));
+    const actualPreview = await page.evaluate((due) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(due)), after.cards[0].schedule.due);
+    expect(actualPreview).toBe(previews[2]);
+    expect(after.cards[0].reviewHistory).toHaveLength(1);
+    expect(after.studyStats.reviewCount).toBe((before.studyStats?.reviewCount || 0) + 1);
+    await page.evaluate(async () => {
+      const { cards } = await chrome.storage.local.get("cards");
+      cards.push({ id: "unrated", kind: "word", headword: "unrated", meanings: [{ text: "значение", contexts: [], examples: [] }] });
+      await chrome.storage.local.set({ cards });
+    });
+    await page.getByRole("button", { name: "Начать занятие" }).click();
+    await page.getByRole("button", { name: "Показать ответ" }).click();
+    await page.getByRole("button", { name: "Выйти из занятия" }).click();
+    const exited = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards);
+    expect(exited[0].reviewHistory).toHaveLength(1);
+    expect(exited[0].schedule.due).toBe(after.cards[0].schedule.due);
+    expect(exited[1].reviewHistory).toBeUndefined();
+    expect(exited[1].schedule).toBeUndefined();
+    await expect(page.locator("#review-status")).toContainText("Сохранённые оценки остаются в истории");
+  }
+});
+
 test("оценка карточки обновляет серию и достижения, а пропуск дня сбрасывает серию", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00") });
   await page.goto("/src/review.html");
@@ -206,6 +256,7 @@ test("карточка из словаря получает срок FSRS пос
   expect(await readCardDue(page, "take off")).toBe(due);
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(review.getByRole("heading", { name: "coat", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Выйти из занятия" }).click();
   await page.clock.setSystemTime(new Date(due));
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(review.getByRole("heading", { name: "take off", exact: true })).toBeVisible();
@@ -223,6 +274,7 @@ test("оценка устаревшей карточки во второй вк�
   const due = await readCardDue(page, "take off");
   await other.getByRole("button", { name: "Не вспомнил", exact: true }).click();
   await expect(other.locator("#review-status")).toContainText("Карточка уже изменилась");
+  await expect(other.getByRole("button", { name: "Показать ответ" })).toBeFocused();
   await page.reload();
   expect(await readCardDue(page, "take off")).toBe(due);
 });

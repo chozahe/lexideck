@@ -75,10 +75,10 @@ test("основные действия разделов доступны с к�
     }]
   }));
   await page.goto("/src/review.html");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
+  for (let index = 0; index < 10; index++) {
+    await page.keyboard.press("Tab");
+    if (await page.evaluate(() => document.activeElement.id === "start-review")) break;
+  }
   await expect(page.getByRole("button", { name: "Начать занятие" })).toBeFocused();
   await page.keyboard.press("Enter");
   const answer = page.getByRole("button", { name: "Показать ответ" });

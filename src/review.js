@@ -90,6 +90,13 @@ function renderProgress() {
   bar.value = sessionCompleted;
 }
 
+function renderSessionActions() {
+  const inProgress = sessionStarted && Boolean(currentCard);
+  $("start-review").hidden = inProgress;
+  $("exit-review").hidden = !inProgress;
+  $("review-queue-summary").hidden = inProgress;
+}
+
 async function startSession() {
   sessionQueue = [];
   sessionCompleted = 0;
@@ -125,6 +132,7 @@ async function nextCard() {
   }
   renderProgress();
   if (currentCard) $("review-headword").textContent = currentCard.headword;
+  renderSessionActions();
 }
 
 function showAnswer() {
@@ -140,6 +148,18 @@ function showAnswer() {
       item.textContent = text;
       return item;
     }));
+  }
+  const exampleDetails = $("review-example-details");
+  exampleDetails.open = false;
+  exampleDetails.hidden = !meaning.examples.length;
+  const now = new Date();
+  const previewCard = currentCard.schedule || createEmptyCard(now);
+  const preview = scheduler.repeat(previewCard, now);
+  const dueFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
+  for (const button of $("review-ratings").querySelectorAll("button")) {
+    const due = preview[Number(button.dataset.rating)].card.due;
+    button.querySelector(".rating-due").textContent = dueFormatter.format(new Date(due));
+    button.setAttribute("aria-description", `Следующее повторение: ${dueFormatter.format(new Date(due))}`);
   }
   $("review-answer").hidden = false;
   $("show-answer").hidden = true;
@@ -165,6 +185,17 @@ export function setupReview(onReview = async () => {}) {
     }).catch((error) => { $("review-status").textContent = error.message; $("review-status").focus(); }).finally(() => {
       $("start-review").disabled = saving;
     });
+  });
+  $("exit-review").addEventListener("click", () => {
+    sessionQueue = [];
+    sessionCompleted = 0;
+    sessionStarted = false;
+    currentCard = undefined;
+    $("review-card").hidden = true;
+    $("review-status").textContent = "Вы вышли из занятия. Сохранённые оценки остаются в истории.";
+    renderProgress();
+    renderSessionActions();
+    $("start-review").focus();
   });
   $("show-answer").addEventListener("click", showAnswer);
   for (const button of $("review-ratings").querySelectorAll("button")) {
@@ -208,6 +239,8 @@ export function setupReview(onReview = async () => {}) {
           currentCard = undefined;
           await nextCard();
           $("review-status").textContent = `${error.message} ${$("review-status").textContent}`;
+          if (currentCard) $("show-answer").focus();
+          else $("review-status").focus();
         } else $("review-status").textContent = `Не удалось сохранить ответ: ${error.message}`;
         if (!queueChanged) button.focus();
       } finally {

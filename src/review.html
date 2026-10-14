@@ -31,6 +31,7 @@
           <ul id="queue-reasons" aria-live="polite"></ul>
         </section>
         <button id="start-review" type="button">Начать занятие</button>
+        <button id="exit-review" class="subtle" type="button" hidden>Выйти из занятия</button>
         <progress id="review-progress-bar" aria-label="Прогресс занятия" value="0" max="1" hidden></progress>
         <p id="review-progress" role="status" aria-live="polite">Занятие ещё не начато.</p>
         <p id="review-status" role="status" tabindex="-1"></p>
@@ -41,13 +42,15 @@
             <p id="review-meaning"></p>
             <h4>Контекст употребления</h4>
             <ul id="review-contexts"></ul>
-            <h4>Примеры модели</h4>
-            <ul id="review-examples"></ul>
+            <details id="review-example-details">
+              <summary>Примеры модели</summary>
+              <ul id="review-examples"></ul>
+            </details>
             <div id="review-ratings">
-              <button type="button" data-rating="1">Не вспомнил</button>
-              <button type="button" data-rating="2">Трудно</button>
-              <button type="button" data-rating="3">Хорошо</button>
-              <button type="button" data-rating="4">Легко</button>
+              <button type="button" data-rating="1">Не вспомнил<span class="rating-due" aria-hidden="true"></span></button>
+              <button type="button" data-rating="2">Трудно<span class="rating-due" aria-hidden="true"></span></button>
+              <button type="button" data-rating="3">Хорошо<span class="rating-due" aria-hidden="true"></span></button>
+              <button type="button" data-rating="4">Легко<span class="rating-due" aria-hidden="true"></span></button>
             </div>
           </div>
         </article>
