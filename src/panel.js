@@ -420,39 +420,77 @@ function renderResult(result, sourceText) {
 }
 
 let translationRequest = 0;
+let translationController;
+let activeTranslation;
 
 async function runTranslation(existingRequest) {
   const text = $("source-text").value.trim();
   if (!text) return showError("Введите текст или выберите его на странице.");
+  const config = await currentSettings();
+  const key = JSON.stringify([text, config.apiUrl, config.apiKey, config.model, config.sourceLanguage, config.targetLanguage]);
+  if (existingRequest === undefined && activeTranslation?.key === key) return activeTranslation.promise;
   const request = existingRequest ?? ++translationRequest;
+  if (request !== translationRequest) return;
+  if (activeTranslation?.key === key) return activeTranslation.promise;
+  translationController?.abort();
+  const controller = new AbortController();
+  translationController = controller;
   $("comic-status").textContent = "";
   showError("");
+  $("error-details").hidden = true;
   $("result").hidden = true;
   $("expression-form").hidden = true;
   $("translate").textContent = "Переводим…";
+  $("cancel-translation").hidden = false;
+  const promise = translate(text, controller.signal);
+  activeTranslation = { key, promise };
   try {
-    const result = await translate(text);
-    if (request !== translationRequest) return;
+    const result = await promise;
+    if (request !== translationRequest || controller.signal.aborted) return;
     renderResult(result, text);
   } catch (error) {
-    if (request === translationRequest) showError(error.message || "Не удалось выполнить перевод.");
+    if (request === translationRequest && error.name !== "AbortError") showApiError(error);
   } finally {
-    if (request === translationRequest) $("translate").textContent = "Перевести";
+    if (request === translationRequest) {
+      $("translate").textContent = "Перевести";
+      $("cancel-translation").hidden = true;
+    }
+    if (translationController === controller) translationController = undefined;
+    if (activeTranslation?.promise === promise) activeTranslation = undefined;
   }
 }
 
 $("translate").addEventListener("click", () => void runTranslation());
+$("cancel-translation").addEventListener("click", () => {
+  ++translationRequest;
+  translationController?.abort();
+  activeTranslation = undefined;
+  $("translate").textContent = "Перевести";
+  $("cancel-translation").hidden = true;
+  $("comic-status").textContent = "Запрос отменён.";
+});
 $("source-text").addEventListener("select", updateSelectedExpression);
 $("source-text").addEventListener("keyup", updateSelectedExpression);
 $("source-text").addEventListener("mouseup", updateSelectedExpression);
 $("source-text").addEventListener("input", updateSelectedExpression);
+$("source-text").addEventListener("input", () => {
+  if (!translationController) return;
+  if (activeTranslation && $("source-text").value.trim() === JSON.parse(activeTranslation.key)[0]) return;
+  ++translationRequest;
+  translationController?.abort();
+  activeTranslation = undefined;
+  $("translate").textContent = "Перевести";
+  $("cancel-translation").hidden = true;
+});
 $("save-expression").addEventListener("click", () => {
   if (!selectedExpression) return;
   $("expression-text").textContent = selectedExpression.text;
   $("expression-form").hidden = false;
   $("expression-meaning").focus();
 });
-$("cancel-expression").addEventListener("click", () => { $("expression-form").hidden = true; });
+$("cancel-expression").addEventListener("click", cancelExpression);
+$("cancel-expression-save").addEventListener("click", cancelExpression);
+$("save-expression-offline").addEventListener("click", () => void saveExpressionOffline().catch((error) => showError(`Не удалось сохранить выражение: ${error.message}`)));
 $("expression-form").addEventListener("submit", (event) => void saveExpression(event));
 $("source-text").addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void runTranslation();
@@ -460,6 +498,8 @@ $("source-text").addEventListener("keydown", (event) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.pendingSelection?.newValue) {
+    translationController?.abort();
+    activeTranslation = undefined;
     $("source-text").value = changes.pendingSelection.newValue;
     void chrome.storage.local.remove("pendingSelection");
     void runTranslation();
