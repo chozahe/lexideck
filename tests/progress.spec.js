@@ -93,3 +93,50 @@ test("очередь новых карточек ограничена дневн
   const savedCards = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards);
   expect(savedCards.filter((card) => card.schedule)).toHaveLength(1);
 });
+
+test("сводка перед занятием объясняет пустой словарь и будущие повторы", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
+  await seed(page, 0, 10);
+  await expect(page.locator("#due-count")).toHaveText("0");
+  await expect(page.locator("#new-count")).toHaveText("0");
+  await expect(page.locator("#queue-reasons")).toContainText("Словарь пуст");
+  await expect(page.getByRole("link", { name: "Сохраните первое слово" })).toHaveAttribute("href", "vocabulary.html");
+
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "future", kind: "word", headword: "future", firstReviewedAt: "2026-10-01T12:00:00Z",
+    schedule: { due: "2026-10-12T14:30:00Z" },
+    meanings: [{ text: "значение", contexts: [], examples: [] }]
+  }] }));
+  await expect(page.locator("#queue-reasons")).toContainText(/Следующее повторение назначено на 12 окт/);
+  await expect(page.locator("#queue-reasons")).toContainText("Новых карточек пока нет.");
+});
+
+test("сводка объединяет причины, учитывает нулевой лимит и изменения другой вкладки", async ({ page, context }) => {
+  await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
+  await seed(page, 2, 1);
+  const summary = page.locator("#queue-reasons");
+  await expect(page.locator("#due-count")).toHaveText("0");
+  await expect(page.locator("#new-count")).toHaveText("1");
+  await expect(page.locator("#queue-reasons a").filter({ hasText: "Изменить дневной лимит" })).toHaveAttribute("href", "settings.html");
+  const other = await context.newPage();
+  await other.goto("/src/settings.html");
+  await other.evaluate(async () => chrome.storage.local.set({ newCardLimit: 0, cards: [{
+    id: "future", kind: "word", headword: "future", firstReviewedAt: "2026-10-01T12:00:00Z",
+    schedule: { due: "2026-10-12T14:30:00Z" },
+    meanings: [{ text: "значение", contexts: [], examples: [] }]
+  }, { id: "new", kind: "word", headword: "new", meanings: [{ text: "значение", contexts: [], examples: [] }] }] }));
+  await expect(page.locator("#due-count")).toHaveText("0");
+  await expect(page.locator("#new-count")).toHaveText("0");
+  await expect(summary).toContainText("Следующее повторение назначено на");
+  await expect(summary).toContainText("Дневной лимит новых карточек исчерпан.");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "due", kind: "word", headword: "due", firstReviewedAt: "2026-10-01T12:00:00Z",
+    schedule: { due: "2026-10-09T11:00:00Z" },
+    meanings: [{ text: "значение", contexts: [], examples: [] }]
+  }, { id: "future", kind: "word", headword: "future", firstReviewedAt: "2026-10-01T12:00:00Z",
+    schedule: { due: "2026-10-12T14:30:00Z" }, meanings: [{ text: "значение", contexts: [], examples: [] }] }] }));
+  await expect(page.locator("#due-count")).toHaveText("1");
+  await expect(page.locator("#new-count")).toHaveText("0");
+  await expect(summary).toContainText("Следующее повторение назначено на");
+  await expect(summary).toContainText("Новых карточек пока нет.");
+});
