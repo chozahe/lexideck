@@ -190,9 +190,11 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const status = $("settings-status");
   status.textContent = "";
+  status.dataset.state = "";
   const limit = Number(limitInput.value);
   if (!Number.isSafeInteger(limit) || limit < 0) {
     status.textContent = "Укажите целое неотрицательное число новых карточек.";
+    status.dataset.state = "error";
     limitInput.focus();
     return;
   }
@@ -203,11 +205,15 @@ form.addEventListener("submit", async (event) => {
     updateDirtyState();
     updateApiReadiness();
     status.textContent = "Настройки сохранены на этом устройстве.";
+    status.dataset.state = "success";
   } catch (error) {
     status.textContent = `Не удалось сохранить настройки: ${error.message}`;
+    status.dataset.state = "error";
   }
 });
 
 void loadSettings().catch((error) => {
-  $("settings-status").textContent = `Не удалось загрузить настройки: ${error.message}`;
+  const status = $("settings-status");
+  status.textContent = `Не удалось загрузить настройки: ${error.message}`;
+  status.dataset.state = "error";
 });

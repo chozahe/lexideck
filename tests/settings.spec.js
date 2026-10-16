@@ -67,6 +67,7 @@ test("сохранение снимает предупреждение, а ош�
   await page.locator("#target-language").fill("Italian");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
   await expect(page.locator("#settings-status")).toContainText("Не удалось сохранить настройки");
+  await expect(page.locator("#settings-status")).toHaveAttribute("data-state", "error");
   await expect(page.locator("#target-language")).toHaveValue("Italian");
   await expect(page.locator("#settings-form")).toHaveAttribute("data-dirty", "true");
 });

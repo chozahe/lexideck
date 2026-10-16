@@ -50,9 +50,11 @@ if (selector) {
       await chrome.storage.local.set({ [KEY]: next });
       setPreference(next);
       status.textContent = "Тема сохранена для панели и страниц.";
+      status.dataset.state = "success";
     } catch (error) {
       selector.value = preference;
       status.textContent = `Не удалось сохранить тему: ${error.message}`;
+      status.dataset.state = "error";
     }
   });
 }
