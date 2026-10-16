@@ -77,9 +77,18 @@ async function currentSettings() {
   return { ...DEFAULT_SETTINGS, ...settings };
 }
 
+let apiNextStepRequest = 0;
+
 async function refreshApiNextStep() {
+  const request = ++apiNextStepRequest;
   const settings = await currentSettings();
-  $("api-next-step").hidden = Boolean(settings.apiUrl.trim() && settings.model.trim() && settings.apiKey.trim());
+  if (request !== apiNextStepRequest) return;
+  let validApiUrl = false;
+  try {
+    completionEndpoint(settings.apiUrl);
+    validApiUrl = true;
+  } catch {}
+  $("api-next-step").hidden = Boolean(validApiUrl && settings.model.trim() && settings.apiKey.trim());
 }
 
 function parseCompletion(content, sourceText) {
@@ -482,6 +491,8 @@ function runTranslation(existingRequest, force = false) {
       return key === pending.key ? pending.promise : runTranslation(undefined, true);
     });
   }
+  comicRetryAvailable = false;
+  $("retry-comic").hidden = true;
   const request = existingRequest ?? ++translationRequest;
   if (request !== translationRequest) return;
   translationController?.abort();

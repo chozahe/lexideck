@@ -126,6 +126,37 @@ test("пустое или неполное подключение API подск
   await expect(page.locator("#api-next-step")).toBeHidden();
 });
 
+test("подсказка API игнорирует устаревшее чтение настроек и показывает неверный URL", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("lexideck-test-storage", JSON.stringify({ settings: {} })));
+  await page.route("**/__test/chrome-mock.js", async (route) => {
+    const response = await route.fetch();
+    const source = await response.text();
+    const control = `
+      const originalGet = chrome.storage.local.get.bind(chrome.storage.local);
+      window.__settingsGetQueue = [];
+      chrome.storage.local.get = async (key) => {
+        if (key !== "settings") return originalGet(key);
+        const snapshot = await originalGet(key);
+        return new Promise((resolve) => window.__settingsGetQueue.push(() => resolve(snapshot)));
+      };
+    `;
+    await route.fulfill({ response, body: `${source}\n${control}` });
+  });
+  await page.goto("/src/panel.html");
+  await expect.poll(() => page.evaluate(() => window.__settingsGetQueue.length)).toBe(1);
+  await page.evaluate(() => chrome.storage.local.set({ settings: { apiUrl: "https://api.example.com/v1", model: "model", apiKey: "local-key" } }));
+  await expect.poll(() => page.evaluate(() => window.__settingsGetQueue.length)).toBe(2);
+  await page.evaluate(() => window.__settingsGetQueue[1]());
+  await expect(page.locator("#api-next-step")).toBeHidden();
+  await page.evaluate(() => window.__settingsGetQueue[0]());
+  await expect(page.locator("#api-next-step")).toBeHidden();
+
+  await page.evaluate(() => chrome.storage.local.set({ settings: { apiUrl: "api.example.com/v1", model: "model", apiKey: "local-key" } }));
+  await expect.poll(() => page.evaluate(() => window.__settingsGetQueue.length)).toBe(3);
+  await page.evaluate(() => window.__settingsGetQueue[2]());
+  await expect(page.locator("#api-next-step")).toBeVisible();
+});
+
 test("пользователь получает перевод и значения слов по порядку через API", async ({ page, request }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
@@ -651,6 +682,34 @@ test("после отмены распознавания можно повтор
   await expect(page.locator("#retry-comic")).toBeFocused();
   expect(await page.evaluate(() => window.__reselectMessages)).toEqual([{ type: "LEXIDECK_RESELECT_COMIC" }]);
   finishVision();
+});
+
+test("после OCR ошибки отмена обычного перевода не возвращает повторный выбор области", async ({ page }) => {
+  await prepareComicPanel(page);
+  let releaseTranslation;
+  let translationStarted;
+  const started = new Promise((resolve) => { translationStarted = resolve; });
+  await page.route("**/v1/chat/completions", async (route) => {
+    const content = route.request().postDataJSON().messages[1].content;
+    if (Array.isArray(content)) {
+      await route.fulfill({ status: 503, json: { error: "Не удалось распознать реплику" } });
+      return;
+    }
+    translationStarted();
+    await new Promise((resolve) => { releaseTranslation = resolve; });
+    try { await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ sentence_translation: "Перевод", words: [] }) } }] } }); } catch {}
+  });
+  await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("failed-ocr"));
+  await expect(page.locator("#error")).toContainText("Сервис API временно недоступен");
+  await expect(page.locator("#retry-comic")).toBeVisible();
+
+  await page.locator("#source-text").fill("Ordinary text after OCR");
+  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await started;
+  await page.getByRole("button", { name: "Отменить перевод" }).click();
+  await expect(page.locator("#retry-comic")).toBeHidden();
+  await expect(page.locator("#translate")).toBeFocused();
+  releaseTranslation();
 });
 
 test("новый текст и новая область заменяют запоздалое распознавание", async ({ page }) => {
