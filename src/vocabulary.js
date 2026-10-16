@@ -209,7 +209,7 @@ function openEditor(card, meaningIndex, selectedContextIndex = undefined) {
     const nextForm = contextForm.value.trim();
     const nextContext = contextText.value.trim();
     if (!nextMeaning || !nextForm || !nextContext) {
-      status.textContent = "Заполните значение, основную форму и контекст.";
+      status.textContent = "Заполните значение, словоформу и контекст.";
       return;
     }
     save.disabled = true;

@@ -325,6 +325,22 @@ test("каждый контекст значения можно исправит
   ]);
 });
 
+test("валидация редактора называет встретившуюся форму словоформой", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "validation-form", kind: "word", headword: "take off",
+    meanings: [{ text: "снять", contexts: [{ form: "took off", text: "She took off her coat." }], examples: [] }]
+  }] }));
+  const card = page.locator('[data-card-id="validation-form"]');
+  await card.locator("summary").click();
+  await card.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await page.getByLabel("Словоформа в контексте").fill(" ");
+  await page.getByRole("button", { name: "Сохранить изменения" }).click();
+  await expect(card.getByRole("status")).toHaveText("Заполните значение, словоформу и контекст.");
+  const saved = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards[0]);
+  expect(saved.meanings[0].contexts[0].form).toBe("took off");
+});
+
 test("отказ закрыть изменённый редактор сохраняет форму и черновик", async ({ page }) => {
   await page.goto("/src/vocabulary.html");
   await page.evaluate(async () => chrome.storage.local.set({ cards: [{
