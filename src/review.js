@@ -98,6 +98,7 @@ function renderSessionActions() {
 }
 
 async function startSession() {
+  $("study-achievement-details").open = false;
   sessionQueue = [];
   sessionCompleted = 0;
   sessionStarted = true;

@@ -307,6 +307,22 @@ test("выражение сохраняется без API, а примеры д
   expect((await (await request.get("/__test/requests")).json()).length).toBe(callsBefore + 1);
 });
 
+test("генерация примеров удаляет повторы из одного ответа модели", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await configureApi(page);
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "dedupe-examples", kind: "expression", headword: "take off",
+    meanings: [{ text: "снять", contexts: [{ form: "took off", text: "She took off her coat." }], examples: [] }]
+  }] }));
+  await page.goto("/src/vocabulary.html");
+  await page.route("**/v1/chat/completions", (route) => route.fulfill({ json: { choices: [{ message: {
+    content: JSON.stringify({ examples: ["Same example.", "Same example.", "Second example."] })
+  } }] } }));
+  await page.locator("#vocabulary-cards summary").click();
+  await page.getByRole("button", { name: "Добавить примеры модели" }).click();
+  await expect.poll(() => page.evaluate(async () => (await chrome.storage.local.get("cards")).cards[0].meanings[0].examples)).toEqual(["Same example.", "Second example."]);
+});
+
 test("отмена запроса примеров закрывает форму и блокирует позднее сохранение выражения", async ({ page }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
@@ -333,6 +349,42 @@ test("отмена запроса примеров закрывает форму
   await expect(page.locator("#expression-form")).toBeHidden();
   await expect(page.locator("#save-expression")).toBeFocused();
   release();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("lexideck-test-storage")).cards || [])).toEqual([]);
+  await page.unroute("**/v1/chat/completions");
+  await page.getByRole("button", { name: "Сохранить выделенное выражение" }).click();
+  await expect(page.getByRole("button", { name: "Сохранить выражение" })).toBeEnabled();
+  await page.getByRole("button", { name: "Сохранить выражение" }).click();
+  await expect(page.getByRole("button", { name: "Выражение сохранено", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("lexideck-test-storage")).cards || [])).toHaveLength(1);
+});
+
+test("отмена при ожидании блокировки не записывает выражение и повторный запуск работает", async ({ page }) => {
+  await page.goto("/src/panel.html");
+  await configureApi(page);
+  await page.locator("#source-text").evaluate((textarea) => {
+    textarea.value = "She let the cat out of the bag.";
+    textarea.setSelectionRange(4, 30);
+    textarea.dispatchEvent(new Event("select", { bubbles: true }));
+  });
+  await page.getByRole("button", { name: "Сохранить выделенное выражение" }).click();
+  await page.locator("#expression-meaning").fill("раскрыть секрет");
+  await page.evaluate(() => {
+    window.__heldCardLock = new Promise((resolve) => { window.__releaseCardLock = resolve; });
+    window.__cardLockAcquired = false;
+    window.__cardLockPromise = navigator.locks.request("lexideck-cards", async () => {
+      window.__cardLockAcquired = true;
+      await window.__heldCardLock;
+    });
+  });
+  await expect.poll(() => page.evaluate(() => window.__cardLockAcquired)).toBe(true);
+  const responseStarted = page.waitForRequest((request) => request.url().includes("/v1/chat/completions"));
+  await page.getByRole("button", { name: "Сохранить выражение" }).click();
+  await responseStarted;
+  await expect(page.locator("#expression-form button[type=submit]")).toHaveText("Сохраняем…");
+  await page.getByRole("button", { name: "Отмена", exact: true }).click();
+  await expect(page.locator("#expression-form")).toBeHidden();
+  await page.evaluate(() => window.__releaseCardLock());
+  await page.evaluate(() => window.__cardLockPromise);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("lexideck-test-storage")).cards || [])).toEqual([]);
 });
 

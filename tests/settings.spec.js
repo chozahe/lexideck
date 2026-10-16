@@ -72,6 +72,19 @@ test("сохранение снимает предупреждение, а ош�
   await expect(page.locator("#settings-form")).toHaveAttribute("data-dirty", "true");
 });
 
+test("снимок сохранения соответствует отправленным значениям при правке в ожидании записи", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  await page.locator("#target-language").fill("French");
+  await page.evaluate(() => localStorage.setItem("lexideck-test-storage-hold-set", "true"));
+  await page.getByRole("button", { name: "Сохранить настройки" }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.__releaseStorageSet))).toBe(true);
+  await page.locator("#target-language").fill("German");
+  await page.evaluate(() => window.__releaseStorageSet());
+  await expect(page.locator("#settings-status")).toHaveText("Настройки сохранены на этом устройстве.");
+  await expect(page.locator("#settings-form")).toHaveAttribute("data-dirty", "true");
+  expect(await page.evaluate(async () => (await chrome.storage.local.get("settings")).settings.targetLanguage)).toBe("French");
+});
+
 test("показывает пустое и частичное состояние подключения и сохраняет лимит без API", async ({ page }) => {
   await page.goto("/src/settings.html");
   await expect(page.locator("#api-readiness")).toHaveText(/Перевод ещё не настроен.*URL API.*модель.*ключ/);
@@ -128,4 +141,55 @@ test("проверка подключения принимает полный en
   const call = await (await request.get("/__test/last-request")).json();
   expect(call.url).toBe("/v1/chat/completions");
   expect(call.body.model).toBe("probe-model");
+});
+
+test("устаревший ответ проверки не подтверждает изменённую модель", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  await page.locator("#api-url").fill(new URL("/v1", page.url()).origin + "/v1");
+  await page.locator("#model").fill("model-a");
+  await page.locator("#api-key").fill("probe-secret");
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  await page.route("**/v1/chat/completions", async (route) => {
+    await pending;
+    await route.fulfill({ json: { choices: [{ message: { content: "OK" } }] } });
+  });
+  await page.getByRole("button", { name: "Проверить подключение" }).click();
+  await page.locator("#model").fill("model-b");
+  await expect(page.locator("#api-test-status")).toContainText("Параметры подключения изменились");
+  await expect(page.locator("#test-api")).toBeEnabled();
+  release();
+  await page.waitForTimeout(50);
+  await expect(page.locator("#api-test-status")).not.toContainText("выполнен успешно");
+});
+
+test("ошибка API не показывает ключ в основном сообщении или подробностях", async ({ page, request }) => {
+  await page.goto("/src/settings.html");
+  await page.locator("#api-url").fill(new URL("/v1", page.url()).origin + "/v1");
+  await page.locator("#model").fill("probe-model");
+  await page.locator("#api-key").fill("invalid api key");
+  await request.post("/__test/error");
+  await page.getByRole("button", { name: "Проверить подключение" }).click();
+  await expect(page.locator("#api-test-status")).toContainText("Проверьте URL, модель и права ключа");
+  await expect(page.locator("#api-test-status")).not.toContainText("invalid api key");
+  await expect(page.locator("#api-test-details")).toBeVisible();
+  await page.locator("#api-test-details summary").click();
+  await expect(page.locator("#api-test-detail")).not.toContainText("invalid api key");
+});
+
+test("общий API timeout охватывает чтение позднего тела ответа", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  const result = await page.evaluate(async () => {
+    const { requestApi } = await import("./api-request.js");
+    window.fetch = async (_url, { signal }) => new Response(new ReadableStream({
+      start(controller) { signal.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")), { once: true }); }
+    }));
+    try {
+      await requestApi("/slow", {}, (response) => response.json(), 10);
+      return "resolved";
+    } catch (error) {
+      return error.kind;
+    }
+  });
+  expect(result).toBe("timeout");
 });

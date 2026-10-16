@@ -35,7 +35,7 @@ const server = http.createServer((request, response) => {
               const keys = Array.isArray(key) ? key : [key];
               return structuredClone(Object.fromEntries(keys.map((item) => [item, values[item]])));
             },
-            set: async (next) => { if (localStorage.getItem("lexideck-test-storage-fail-set") === "true") throw new Error("quota exceeded"); Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"), structuredClone(next)); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
+            set: async (next) => { if (localStorage.getItem("lexideck-test-storage-fail-set") === "true") throw new Error("quota exceeded"); if (localStorage.getItem("lexideck-test-storage-hold-set") === "true") await new Promise((resolve) => { window.__releaseStorageSet = resolve; }); Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"), structuredClone(next)); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
             remove: async (key) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}")); delete values[key]; localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); }
           },
           session: {

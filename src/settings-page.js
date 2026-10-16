@@ -1,5 +1,6 @@
 import "./theme.js";
 import { completionEndpoint, DEFAULT_SETTINGS } from "./settings.js";
+import { requestApi } from "./api-request.js";
 
 const $ = (id) => document.getElementById(id);
 const form = $("settings-form");
@@ -15,6 +16,7 @@ const limitInput = $("new-card-limit");
 let savedSnapshot = null;
 let allowNavigation = false;
 let apiTestSnapshot = null;
+let apiTestRequest = 0;
 
 function currentSnapshot() {
   return JSON.stringify({
@@ -83,6 +85,13 @@ function updateApiReadiness() {
 }
 
 for (const input of apiFields) input.addEventListener("input", () => {
+  const wasPending = $("api-test-status").dataset.state === "pending";
+  apiTestRequest++;
+  if (wasPending) {
+    $("api-test-status").textContent = "Параметры подключения изменились. Проверьте подключение ещё раз.";
+    $("api-test-status").dataset.state = "";
+    $("test-api").disabled = false;
+  }
   const errorId = { "api-url": "api-url-error", model: "model-error", "api-key": "api-key-error" }[input.id];
   $(errorId).textContent = "";
   input.removeAttribute("aria-invalid");
@@ -126,11 +135,15 @@ $("test-api").addEventListener("click", async () => {
   }
 
   const button = $("test-api");
+  const testedSnapshot = apiSnapshot();
+  const request = ++apiTestRequest;
   button.disabled = true;
   status.textContent = "Проверяем текстовый запрос к API…";
   status.dataset.state = "pending";
+  $("api-test-details").hidden = true;
+  $("api-test-detail").textContent = "";
   try {
-    const response = await fetch(endpoint, {
+    const payload = await requestApi(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({
@@ -138,24 +151,31 @@ $("test-api").addEventListener("click", async () => {
         temperature: 0,
         messages: [{ role: "user", content: "Ответь одним словом: OK" }]
       })
+    }, async (response) => {
+      if (!response.ok) {
+        const detail = (await response.text()).slice(0, 300).replaceAll(key, "[ключ скрыт]");
+        const error = new Error(`Сервис вернул ошибку ${response.status}.`);
+        error.detail = `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
+        throw error;
+      }
+      return response.json();
     });
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 300);
-      throw new Error(`Сервис вернул ошибку ${response.status}${detail ? `: ${detail}` : "."}`);
-    }
-    const payload = await response.json();
     if (typeof payload.choices?.[0]?.message?.content !== "string") {
       throw new Error("Ответ сервиса не содержит текст завершения.");
     }
-    apiTestSnapshot = apiSnapshot();
+    if (request !== apiTestRequest || testedSnapshot !== apiSnapshot()) return;
+    apiTestSnapshot = testedSnapshot;
     status.textContent = "Текстовый запрос выполнен успешно. Поддержка изображений этой проверкой не подтверждена.";
     status.dataset.state = "success";
   } catch (error) {
+    if (request !== apiTestRequest || testedSnapshot !== apiSnapshot()) return;
     apiTestSnapshot = null;
-    status.textContent = `Проверка не пройдена: ${error.message}`;
+    status.textContent = `Проверка не пройдена: ${error.message} Проверьте URL, модель и права ключа; технический ответ доступен отдельно.`;
     status.dataset.state = "error";
+    $("api-test-detail").textContent = error.detail || error.message;
+    $("api-test-details").hidden = false;
   } finally {
-    button.disabled = false;
+    if (request === apiTestRequest) button.disabled = false;
   }
 });
 
@@ -200,8 +220,9 @@ form.addEventListener("submit", async (event) => {
   }
   try {
     const settings = Object.fromEntries(Object.entries(fields).map(([key, input]) => [key, input.value.trim()]));
+    const submittedSnapshot = JSON.stringify({ settings, newCardLimit: String(limit) });
     await chrome.storage.local.set({ settings, newCardLimit: limit });
-    savedSnapshot = currentSnapshot();
+    savedSnapshot = submittedSnapshot;
     updateDirtyState();
     updateApiReadiness();
     status.textContent = "Настройки сохранены на этом устройстве.";

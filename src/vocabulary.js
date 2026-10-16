@@ -2,6 +2,7 @@ import "./theme.js";
 import { createBackup, parseBackup, restoreBackup } from "./backup.js";
 import { DEFAULT_SETTINGS } from "./settings.js";
 import { updateCards } from "./cards.js";
+import { requestExamples } from "./examples.js";
 
 const $ = (id) => document.getElementById(id);
 const PAGE_SIZE = 50;
@@ -73,12 +74,34 @@ function renderDetails(container, card) {
     section.className = "vocabulary-meaning";
     const heading = document.createElement("h3");
     heading.textContent = meaning.text;
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.textContent = "Изменить значение и контекст";
-    edit.addEventListener("click", () => openEditor(card, meaningIndex));
-    section.append(heading, edit);
-    appendList(section, "Контексты употребления", meaning.contexts, (context) => `${context.form}: ${context.text}`);
+    section.append(heading);
+    if (meaning.contexts.length) {
+      const contextHeading = document.createElement("h4");
+      contextHeading.textContent = "Контексты употребления";
+      const contextList = document.createElement("ul");
+      meaning.contexts.forEach((context, contextIndex) => {
+        const item = document.createElement("li");
+        item.append(document.createTextNode(`${context.form}: ${context.text} `));
+        const editContext = document.createElement("button");
+        editContext.type = "button";
+        editContext.textContent = `Изменить контекст ${contextIndex + 1}`;
+        editContext.addEventListener("click", () => openEditor(card, meaningIndex, contextIndex));
+        item.append(editContext);
+        contextList.append(item);
+      });
+      section.append(contextHeading, contextList);
+      const editMeaning = document.createElement("button");
+      editMeaning.type = "button";
+      editMeaning.textContent = "Изменить значение и контекст";
+      editMeaning.addEventListener("click", () => openEditor(card, meaningIndex));
+      section.append(editMeaning);
+    } else {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.textContent = "Изменить значение и добавить контекст";
+      edit.addEventListener("click", () => openEditor(card, meaningIndex, -1));
+      section.append(edit);
+    }
     appendList(section, "Примеры модели", meaning.examples);
     if (!meaning.examples?.length) {
       const addExamples = document.createElement("button");
@@ -104,35 +127,7 @@ async function generateExamples(card, meaning, button) {
     const { settings = {} } = await chrome.storage.local.get("settings");
     const config = { ...DEFAULT_SETTINGS, ...settings };
     if (!config.apiUrl || !config.apiKey || !config.model) throw new Error("Настройте URL API, ключ и модель в разделе «Настройки».");
-    const base = config.apiUrl.trim().replace(/\/+$/, "");
-    const url = /^https?:\/\//i.test(base) ? (base.endsWith("/chat/completions") ? base : base + "/chat/completions") : "";
-    if (!url) throw new Error("Укажите корректный URL API в настройках.");
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
-    let response;
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + config.apiKey },
-        body: JSON.stringify({ model: config.model, temperature: 0.2, response_format: { type: "json_object" }, messages: [
-          { role: "system", content: "Сгенерируй два дополнительных примера на " + config.sourceLanguage + " для выражения «" + card.headword + "» со значением «" + meaning.text + "». Не копируй исходный контекст. Верни только JSON: {\"examples\":[\"пример 1\",\"пример 2\"]}." },
-          { role: "user", content: meaning.contexts?.[0]?.text || card.headword }
-        ] }),
-        signal: controller.signal
-      });
-    } catch (error) {
-      if (controller.signal.aborted) throw new Error("Запрос занял больше 60 секунд. Повторите попытку.");
-      throw new Error("Не удалось связаться с API. Проверьте соединение и настройки.");
-    } finally { clearTimeout(timeout); }
-    if (!response.ok) {
-      const hints = { 401: "Проверьте ключ API.", 429: "Подождите и повторите запрос." };
-      throw new Error(hints[response.status] || "API вернул ошибку " + response.status + ".");
-    }
-    const payload = await response.json();
-    const examples = JSON.parse(payload.choices?.[0]?.message?.content || "{}").examples;
-    if (!Array.isArray(examples) || examples.length < 2 || examples.length > 3 || examples.some((item) => typeof item !== "string" || !item.trim())) {
-      throw new Error("Модель вернула некорректный список примеров.");
-    }
+    const examples = await requestExamples(card.headword, meaning.text, meaning.contexts?.[0]?.text || card.headword, config);
     await updateCards((cards) => {
       const currentCard = cards.find((item) => item.id === card.id);
       const currentMeaning = currentCard?.meanings.find((item) => item.text === meaning.text);
@@ -141,7 +136,11 @@ async function generateExamples(card, meaning, button) {
       currentMeaning.examples ||= [];
       for (const example of examples) {
         const clean = example.trim();
-        if (!existing.has(clean.toLocaleLowerCase())) currentMeaning.examples.push(clean);
+        const normalized = clean.toLocaleLowerCase();
+        if (!existing.has(normalized)) {
+          currentMeaning.examples.push(clean);
+          existing.add(normalized);
+        }
       }
     });
   } catch (error) {
@@ -157,13 +156,14 @@ function setDirty(dirty) {
   window.onbeforeunload = dirty ? (event) => { event.preventDefault(); event.returnValue = ""; } : null;
 }
 
-function openEditor(card, meaningIndex) {
+function openEditor(card, meaningIndex, selectedContextIndex = undefined) {
+  if (!leaveEditor()) return;
   const record = nodes.get(card.id);
   const meaning = card.meanings[meaningIndex];
   if (!record || !meaning) return;
   editing = { cardId: card.id, meaningIndex, dirty: false };
   const originalText = meaning.text;
-  const contextIndex = meaning.contexts.length ? 0 : -1;
+  const contextIndex = selectedContextIndex ?? (meaning.contexts.length ? meaning.contexts.length - 1 : -1);
   const originalContext = meaning.contexts[contextIndex] || { form: card.headword, text: "" };
   const form = document.createElement("form");
   form.className = "vocabulary-editor";
@@ -242,6 +242,7 @@ function openEditor(card, meaningIndex) {
     }
   });
   form.append(meaningLabel, formLabel, contextLabel, save, cancel, status);
+  editing.form = form;
   record.content.replaceChildren(form);
   meaningInput.focus();
 }
@@ -275,14 +276,18 @@ function makeNode(card) {
       if (latest) renderDetails(content, latest);
     } else expandedIds.delete(details.dataset.cardId);
   });
-  summary.addEventListener("click", () => {
-    if (details.open && editing?.cardId === card.id && !leaveEditor()) {
-      details.open = true;
+  summary.addEventListener("click", (event) => {
+    if (details.open && editing?.cardId === card.id && editing.dirty && !window.confirm("Отменить несохранённые изменения карточки?")) {
+      event.preventDefault();
+      editing.form?.querySelector('input[name="meaning"]')?.focus();
       return;
     }
-    if (details.open) expandedIds.delete(card.id);
-    else expandedIds.add(card.id);
-    writeUrlState("push");
+    if (details.open && editing?.cardId === card.id) leaveEditor();
+    queueMicrotask(() => {
+      if (details.open) expandedIds.add(card.id);
+      else expandedIds.delete(card.id);
+      writeUrlState("push");
+    });
   });
   const record = { details, headword, status, content, signature: "" };
   updateNode(card, record);
@@ -292,7 +297,10 @@ function makeNode(card) {
 
 function updateNode(card, record) {
   const signature = JSON.stringify(card);
-  if (record.signature === signature) return;
+  if (record.signature === signature) {
+    record.details.open = expandedIds.has(card.id);
+    return;
+  }
   record.signature = signature;
   record.details.dataset.cardId = card.id;
   record.headword.textContent = card.headword;

@@ -20,7 +20,7 @@ test("клавиатурный цикл сохраняет фокус на от�
   await page.goto("/src/review.html");
   await page.evaluate(async () => chrome.storage.local.set({ cards: ["one", "two"].map((headword) => ({
     id: headword, kind: "word", headword,
-    meanings: [{ text: `значение ${headword}`, contexts: [{ form: headword, text: `Контекст ${headword}.` }], examples: [] }]
+        meanings: [{ text: `значение ${headword}`, contexts: [{ form: headword, text: `Контекст ${headword}.` }], examples: [`Пример ${headword}.`] }]
   })) }));
   await page.reload();
   const show = page.getByRole("button", { name: "Показать ответ" });
@@ -115,7 +115,9 @@ test("оценка карточки обновляет серию и дости�
   await expect(page.locator("#study-streak")).toHaveText("Серия занятий: 2 дня");
   await expect(page.locator("#study-achievements")).toContainText("Пока не получено: Первый ответ");
   await expect(page.locator("#study-achievements")).toContainText("Пока не получено: Серия из 3 дней");
+  await page.locator("#study-achievement-details").evaluate((details) => { details.open = true; });
   await page.getByRole("button", { name: "Начать занятие" }).click();
+  await expect(page.locator("#study-achievement-details")).not.toHaveAttribute("open", "");
   await review.getByRole("button", { name: "Показать ответ" }).click();
   await review.getByRole("button", { name: "Хорошо", exact: true }).click();
   await expect(page.locator("#study-streak")).toHaveText("Серия занятий: 3 дня");
@@ -219,9 +221,15 @@ async function saveTranslatedWords(page) {
 }
 
 async function readCardDue(page, headword) {
+  await expect.poll(() => page.evaluate(async (word) => {
+    const { cards = [] } = await chrome.storage.local.get("cards");
+    return cards.find((card) => card.headword === word)?.schedule?.due || null;
+  }, headword)).not.toBeNull();
   await page.goto("/src/vocabulary.html");
   const card = page.locator("#vocabulary-cards details").filter({ has: page.locator("summary strong", { hasText: headword }) });
   await expect(card.locator("summary")).toBeVisible();
+  await card.locator("summary").click();
+  await expect(card.locator("time")).toBeVisible();
   const due = await card.locator("time").getAttribute("datetime");
   await page.goto("/src/review.html");
   return due;
@@ -239,8 +247,8 @@ test("значения карточки чередуются с общим ра�
   await expect(page.locator("#review-meaning")).toHaveText("пальто, которое она сняла");
   await expect(review).not.toContainText("пальто, которое она надела");
   await review.getByRole("button", { name: "Не вспомнил", exact: true }).click();
-  const due = await readCardDue(page, "coat");
   await expect(page.locator("#review-card")).toBeHidden();
+  const due = await readCardDue(page, "coat");
   await page.goto("/src/settings.html");
   await page.getByLabel("Новых карточек в день").fill("0");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
@@ -253,8 +261,12 @@ test("значения карточки чередуются с общим ра�
   await expect(page.locator("#review-meaning")).toHaveText("пальто, которое она надела");
   await expect(review).not.toContainText("пальто, которое она сняла");
   await review.getByRole("button", { name: "Трудно", exact: true }).click();
+  await expect(page.locator("#review-card")).toBeHidden();
   const updatedDue = await readCardDue(page, "coat");
-  expect(updatedDue).not.toBe(due);
+  const afterHard = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards.find((card) => card.headword === "coat"));
+  expect(new Date(updatedDue).getTime()).toBeGreaterThan(0);
+  expect(afterHard.reviewHistory).toHaveLength(2);
+  expect(afterHard.reviewHistory.at(-1).rating).toBe(2);
 });
 
 test("карточка из словаря получает срок FSRS после показа ответа и оценки", async ({ page }) => {

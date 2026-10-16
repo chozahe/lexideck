@@ -36,8 +36,8 @@ test("длинный текст остаётся доступен на четы�
   await page.evaluate(async (longCard) => chrome.storage.local.set({ cards: [longCard] }), card);
 
   const report = [];
-  for (const [width, zoom] of [[320, "400% эквивалент CSS viewport"], [390, "обычный мобильный viewport"], [640, "200% эквивалент CSS viewport"], [1280, "desktop viewport"]]) {
-    await page.setViewportSize({ width, height: 900 });
+  for (const [width, height, zoom] of [[320, 225, "400% эквивалент CSS viewport"], [390, 844, "обычный мобильный viewport"], [640, 450, "200% эквивалент CSS viewport"], [1280, 900, "desktop viewport"]]) {
+    await page.setViewportSize({ width, height });
     for (const theme of ["latte", "macchiato", "system-light", "system-dark"]) {
       if (theme === "system-light") {
         await page.emulateMedia({ colorScheme: "light" });

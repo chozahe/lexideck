@@ -88,6 +88,17 @@ test("поиск находит основную форму и значение,
   await expect(cards.nth(0).locator(".vocabulary-meaning h3")).toBeHidden();
 });
 
+test("маркер раскрытия карточки не добавляет текст в accessibility tree", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "marker-card", kind: "word", headword: "marker", meanings: [{ text: "значение", contexts: [], examples: [] }]
+  }] }));
+  const snapshot = await page.locator("#vocabulary-cards summary").ariaSnapshot();
+  expect(snapshot).toContain("marker");
+  expect(snapshot).not.toContain("▸");
+  expect(snapshot).not.toContain("▾");
+});
+
 test("карточка, сохранённая в панели, появляется в открытом словаре", async ({ page }) => {
   await page.goto("/src/settings.html");
   await page.locator("#api-url").fill(new URL("/v1", page.url()).href);
@@ -255,6 +266,45 @@ test("значение и контекст редактируются с отм�
   const backup = JSON.parse(await fs.readFile(await download.path(), "utf8"));
   expect(backup.cards[0].meanings[0].text).toBe("снять одежду");
   expect(backup.cards[0].schedule).toEqual(original.schedule);
+});
+
+test("каждый контекст значения можно исправить отдельно", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "many-contexts", kind: "word", headword: "take off",
+    meanings: [{ text: "снять", contexts: [
+      { form: "took off", text: "Первый контекст." },
+      { form: "takes off", text: "Второй контекст." },
+      { form: "taking off", text: "Третий контекст." }
+    ], examples: [] }]
+  }] }));
+  const card = page.locator('[data-card-id="many-contexts"]');
+  await card.locator("summary").click();
+  await card.getByRole("button", { name: "Изменить контекст 2" }).click();
+  await expect(page.getByLabel("Контекст употребления")).toHaveValue("Второй контекст.");
+  await page.getByLabel("Контекст употребления").fill("Исправленный второй контекст.");
+  await page.getByRole("button", { name: "Сохранить изменения" }).click();
+  await expect(page.locator("#vocabulary-status")).toHaveText("Изменения сохранены.");
+  const saved = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards[0]);
+  expect(saved.meanings[0].contexts.map((context) => context.text)).toEqual([
+    "Первый контекст.", "Исправленный второй контекст.", "Третий контекст."
+  ]);
+});
+
+test("отказ закрыть изменённый редактор сохраняет форму и черновик", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "dirty-editor", kind: "word", headword: "word",
+    meanings: [{ text: "значение", contexts: [{ form: "word", text: "Исходный контекст." }], examples: [] }]
+  }] }));
+  const card = page.locator('[data-card-id="dirty-editor"]');
+  await card.locator("summary").click();
+  await card.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await page.getByLabel("Значение").fill("черновик");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await card.locator("summary").click();
+  await expect(card).toHaveAttribute("open", "");
+  await expect(page.getByLabel("Значение")).toHaveValue("черновик");
 });
 
 test("удаление карточки отменяется без изменений или подтверждается и убирает её из занятия", async ({ page, context }) => {

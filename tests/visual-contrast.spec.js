@@ -24,7 +24,11 @@ test("активные основные кнопки и статусы имею�
     ]) {
       await page.goto(`/src/${path}`);
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(150);
       const button = page.locator(selector);
+      if (path === "panel.html") await page.locator("#source-text").fill("Contrast check");
+      await expect(button).toBeEnabled();
       await button.focus();
       const normal = await button.evaluate((element) => ({
         foreground: getComputedStyle(element).color,
@@ -33,6 +37,7 @@ test("активные основные кнопки и статусы имею�
       expect(contrast(normal.foreground, normal.background), `${theme} ${path} normal`).toBeGreaterThanOrEqual(4.5);
 
       await button.hover();
+      await page.waitForTimeout(150);
       const hover = await button.evaluate((element) => ({ foreground: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor }));
       expect(contrast(hover.foreground, hover.background), `${theme} ${path} hover`).toBeGreaterThanOrEqual(4.5);
 
@@ -63,5 +68,89 @@ test("активные основные кнопки и статусы имею�
       background: getComputedStyle(document.querySelector("section")).backgroundColor
     })));
     expect(contrast(neutral.foreground, neutral.background), `${theme} neutral status`).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
+test("все доступные действия и сроки оценки сохраняют контраст во всех интерактивных состояниях", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.addInitScript(() => {
+    window.__contrastProbeActive = false;
+    window.__effectiveBackground = (element) => {
+      let current = element;
+      while (current) {
+        const color = getComputedStyle(current).backgroundColor;
+        if (color !== "rgba(0, 0, 0, 0)" && color !== "transparent") return color;
+        current = current.parentElement;
+      }
+      return "rgb(255, 255, 255)";
+    };
+    document.addEventListener("click", (event) => {
+      if (window.__contrastProbeActive) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+  });
+  const inspect = async (button, label) => {
+    await button.scrollIntoViewIfNeeded();
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(150);
+    const normal = await button.evaluate((element) => [getComputedStyle(element).color, window.__effectiveBackground(element)]);
+    expect(contrast(...normal), `${label} normal`).toBeGreaterThanOrEqual(4.5);
+    await button.hover();
+    await page.waitForTimeout(150);
+    const hover = await button.evaluate((element) => [getComputedStyle(element).color, window.__effectiveBackground(element)]);
+    expect(contrast(...hover), `${label} hover`).toBeGreaterThanOrEqual(4.5);
+    await button.focus();
+    const focus = await button.evaluate((element) => [getComputedStyle(element).color, window.__effectiveBackground(element)]);
+    expect(contrast(...focus), `${label} focus`).toBeGreaterThanOrEqual(4.5);
+    await page.mouse.move(0, 0);
+    await button.hover();
+    await page.evaluate(() => { window.__contrastProbeActive = true; });
+    await page.mouse.down();
+    const active = await button.evaluate((element) => [getComputedStyle(element).color, window.__effectiveBackground(element)]);
+    await page.mouse.up();
+    await page.evaluate(() => { window.__contrastProbeActive = false; });
+    expect(contrast(...active), `${label} active`).toBeGreaterThanOrEqual(4.5);
+  };
+
+  for (const theme of ["latte", "macchiato"]) {
+    await page.goto("/src/settings.html");
+    await page.locator("#theme-preference").selectOption(theme);
+    const origin = new URL(page.url()).origin;
+    const card = { id: "contrast-card", kind: "word", headword: "contrast", meanings: [{
+      text: "значение", contexts: [{ form: "contrast", text: "Контекст." }], examples: ["Пример."]
+    }] };
+    await page.evaluate(async ({ origin, card }) => chrome.storage.local.set({
+      settings: { apiUrl: `${origin}/v1`, apiKey: "contrast-key", model: "contrast-model" }, cards: [card]
+    }), { origin, card });
+
+    await page.goto("/src/panel.html");
+    await page.locator("#source-text").fill("She took off her coat and wore her coat.");
+    await page.locator("#source-text").evaluate((element) => { element.setSelectionRange(4, 12); element.dispatchEvent(new Event("select", { bubbles: true })); });
+    await page.locator("#translate").click();
+    await expect(page.locator("#result")).toBeVisible();
+    await expect(page.locator("#word-meanings li button").first()).toBeEnabled();
+    for (const button of await page.locator("button:visible:not(:disabled)").all()) await inspect(button, `${theme} panel ${await button.innerText()}`);
+
+    await page.goto("/src/vocabulary.html");
+    await page.locator("#vocabulary-cards summary").click();
+    for (const button of await page.locator("button:visible:not(:disabled)").all()) await inspect(button, `${theme} vocabulary ${await button.innerText()}`);
+
+    await page.goto("/src/review.html");
+    await page.getByRole("button", { name: "Начать занятие" }).click();
+    await page.getByRole("button", { name: "Показать ответ" }).click();
+    for (const button of await page.locator("button:visible:not(:disabled)").all()) {
+      const label = await button.innerText();
+      await inspect(button, `${theme} review ${label}`);
+      for (const due of await button.locator(".rating-due").all()) {
+        const colors = await due.evaluate((element) => [getComputedStyle(element).color, window.__effectiveBackground(element.parentElement)]);
+        expect(contrast(...colors), `${theme} review ${label} due label`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+
+    await page.goto("/src/settings.html");
+    for (const input of ["#api-url", "#model", "#api-key"]) await page.locator(input).fill(input === "#api-url" ? `${origin}/v1` : "contrast");
+    for (const button of await page.locator("button:visible:not(:disabled)").all()) await inspect(button, `${theme} settings ${await button.innerText()}`);
   }
 });

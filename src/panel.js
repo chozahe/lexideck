@@ -1,6 +1,8 @@
 import "./theme.js";
 import { completionEndpoint, DEFAULT_SETTINGS } from "./settings.js";
 import { updateCards } from "./cards.js";
+import { requestExamples } from "./examples.js";
+import { requestApi } from "./api-request.js";
 
 const $ = (id) => document.getElementById(id);
 function showError(message) {
@@ -18,75 +20,48 @@ async function apiCompletion(messages, config, { signal } = {}) {
     error.kind = "configuration";
     throw error;
   }
-  const controller = new AbortController();
-  const abort = () => controller.abort(signal?.reason);
-  signal?.addEventListener("abort", abort, { once: true });
-  const timeout = setTimeout(() => controller.abort("timeout"), 60_000);
-  let response;
+  let payload;
   try {
-    response = await fetch(completionEndpoint(config.apiUrl), {
+    payload = await requestApi(completionEndpoint(config.apiUrl), {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + config.apiKey },
       body: JSON.stringify({ model: config.model, temperature: 0.2, response_format: { type: "json_object" }, messages }),
-      signal: controller.signal
+      signal
+    }, async (response) => {
+      if (!response.ok) {
+        let responseText = "";
+        try { responseText = await response.text(); } catch (error) {
+          if (error.name === "AbortError") throw error;
+        }
+        const detail = responseText.slice(0, 400).replaceAll(config.apiKey, "[скрыто]");
+        const errors = {
+          401: "Ключ API отклонён. Проверьте ключ в настройках.",
+          403: "Сервис запретил запрос. Проверьте права ключа и доступность модели.",
+          429: "Превышен лимит запросов. Подождите и повторите попытку."
+        };
+        const error = new Error(errors[response.status] || (response.status >= 500
+          ? "Сервис API временно недоступен. Повторите попытку позже."
+          : `API вернул ошибку ${response.status}. Проверьте настройки подключения.`));
+        error.kind = "http";
+        error.detail = `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
+        throw error;
+      }
+      try { return await response.json(); } catch (cause) {
+        if (cause.name === "AbortError") throw cause;
+        const error = new Error("API вернул некорректный ответ. Проверьте выбранную модель и повторите попытку.");
+        error.kind = "response";
+        error.detail = cause.message;
+        throw error;
+      }
     });
   } catch (error) {
-    clearTimeout(timeout);
-    signal?.removeEventListener("abort", abort);
     if (signal?.aborted) throw signal.reason || new DOMException("Отменено", "AbortError");
-    if (controller.signal.aborted) {
-      const timeoutError = new Error("Запрос занял больше 60 секунд. Проверьте доступность API и повторите попытку.");
-      timeoutError.kind = "timeout";
-      throw timeoutError;
-    }
+    if (error.kind === "timeout" || error.kind === "http" || error.kind === "response") throw error;
     const networkError = new Error("Не удалось связаться с API. Проверьте интернет-соединение и URL в настройках.");
     networkError.kind = "network";
     networkError.detail = error.message;
     throw networkError;
   }
-  if (!response.ok) {
-    let responseText = "";
-    try { responseText = await response.text(); } catch (error) {
-      clearTimeout(timeout);
-      signal?.removeEventListener("abort", abort);
-      if (controller.signal.aborted && !signal?.aborted) {
-        const timeoutError = new Error("Запрос занял больше 60 секунд. Проверьте доступность API и повторите попытку.");
-        timeoutError.kind = "timeout";
-        throw timeoutError;
-      }
-      throw error;
-    }
-    clearTimeout(timeout);
-    signal?.removeEventListener("abort", abort);
-    let detail = responseText.slice(0, 400).replaceAll(config.apiKey, "[скрыто]");
-    const messages = {
-      401: "Ключ API отклонён. Проверьте ключ в настройках.",
-      403: "Сервис запретил запрос. Проверьте права ключа и доступность модели.",
-      429: "Превышен лимит запросов. Подождите и повторите попытку.",
-    };
-    const error = new Error(messages[response.status] || (response.status >= 500
-      ? "Сервис API временно недоступен. Повторите попытку позже."
-      : `API вернул ошибку ${response.status}. Проверьте настройки подключения.`));
-    error.kind = "http";
-    error.detail = `HTTP ${response.status}${detail ? `: ${detail}` : ""}`;
-    throw error;
-  }
-  let payload;
-  try { payload = await response.json(); } catch (cause) {
-    clearTimeout(timeout);
-    signal?.removeEventListener("abort", abort);
-    if (controller.signal.aborted && !signal?.aborted) {
-      const timeoutError = new Error("Запрос занял больше 60 секунд. Проверьте доступность API и повторите попытку.");
-      timeoutError.kind = "timeout";
-      throw timeoutError;
-    }
-    const error = new Error("API вернул некорректный ответ. Проверьте выбранную модель и повторите попытку.");
-    error.kind = "response";
-    error.detail = cause.message;
-    throw error;
-  }
-  clearTimeout(timeout);
-  signal?.removeEventListener("abort", abort);
   const content = payload.choices?.[0]?.message?.content;
   if (typeof content !== "string") {
     const error = new Error("Ответ API не содержит ожидаемый результат. Проверьте совместимость модели.");
@@ -317,22 +292,14 @@ function updateSelectedExpression() {
 
 async function requestExpressionExamples(expression, meaning, context, signal) {
   const config = await currentSettings();
-  const content = await apiCompletion([
-    { role: "system", content: `Сгенерируй два дополнительных примера на ${config.sourceLanguage} для устойчивого выражения «${expression}» со значением «${meaning}». Не копируй исходный контекст. Верни только JSON: {"examples":["пример 1","пример 2"]}.` },
-    { role: "user", content: context }
-  ], config, { signal });
-  const examples = JSON.parse(content).examples;
-  if (!Array.isArray(examples) || examples.length < 2 || examples.length > 3 || examples.some((item) => typeof item !== "string" || !item.trim())) {
-    throw new Error("Модель должна вернуть 2–3 примера.");
-  }
-  return examples.map((item) => item.trim());
+  return requestExamples(expression, meaning, context, config, { signal });
 }
 
 let expressionSaveRequest = 0;
 let expressionSaveController;
 
-async function persistExpression(expression, meaningText, sourceContext, examples = []) {
-  await updateCards((cards) => {
+async function persistExpression(expression, meaningText, sourceContext, examples = [], { beforeCommit } = {}) {
+  return updateCards((cards) => {
     let card = cards.find((item) => item.kind === "expression" && normalizeTerm(item.headword) === normalizeTerm(expression.text));
     if (!card) {
       card = { id: `${Date.now()}-${Math.random()}`, kind: "expression", headword: expression.text, meanings: [] };
@@ -347,7 +314,7 @@ async function persistExpression(expression, meaningText, sourceContext, example
       meaning.contexts.push({ form: expression.text, text: sourceContext, start: expression.start, end: expression.end });
     }
     appendUnique(meaning.examples, examples);
-  });
+  }, { beforeCommit });
 }
 
 function expressionFormData() {
@@ -376,8 +343,17 @@ async function saveExpression(event) {
     if (request !== expressionSaveRequest || controller.signal.aborted) return;
     submit.textContent = "Сохраняем…";
     $("cancel-expression-save").hidden = true;
-    await persistExpression(data.expression, data.meaningText, data.sourceContext, examples);
+    const committed = await persistExpression(data.expression, data.meaningText, data.sourceContext, examples, {
+      beforeCommit: () => {
+        if (request !== expressionSaveRequest || controller.signal.aborted) return false;
+        submit.disabled = true;
+        $("cancel-expression").disabled = true;
+        $("cancel-expression-save").disabled = true;
+        return true;
+      }
+    });
     if (request !== expressionSaveRequest) return;
+    if (!committed) return;
     $("expression-form").hidden = true;
     $("expression-meaning").value = "";
     $("save-expression").textContent = "Выражение сохранено";
@@ -391,6 +367,8 @@ async function saveExpression(event) {
       submit.disabled = false;
       submit.textContent = "Сохранить выражение";
       $("cancel-expression-save").hidden = true;
+      $("cancel-expression").disabled = false;
+      $("cancel-expression-save").disabled = false;
     }
   }
 }
@@ -407,10 +385,16 @@ async function saveExpressionOffline() {
 }
 
 function cancelExpression() {
+  if ($("cancel-expression").disabled) return;
   ++expressionSaveRequest;
   expressionSaveController?.abort();
   expressionSaveController = undefined;
   $("expression-form").hidden = true;
+  const submit = $("expression-form").querySelector('[type="submit"]');
+  submit.disabled = false;
+  submit.textContent = "Сохранить выражение";
+  $("cancel-expression-save").hidden = true;
+  $("cancel-expression-save").disabled = false;
   $("save-expression").focus();
 }
 
@@ -438,7 +422,6 @@ function renderResult(result, sourceText) {
       try {
         await saveWord(word, sourceText);
         saveStatus.textContent = `Сохранено в словарь: ${word.lemma}.`;
-        await refreshWordSaveButtons();
       } catch (error) {
         showError(`Не удалось сохранить карточку: ${error.message}`);
         save.disabled = false;
@@ -550,6 +533,12 @@ $("source-text").addEventListener("input", () => {
 });
 $("save-expression").addEventListener("click", () => {
   if (!selectedExpression) return;
+  const submit = $("expression-form").querySelector('[type="submit"]');
+  submit.disabled = false;
+  submit.textContent = "Сохранить выражение";
+  $("cancel-expression").disabled = false;
+  $("cancel-expression-save").disabled = false;
+  $("cancel-expression-save").hidden = true;
   $("expression-text").textContent = selectedExpression.text;
   $("expression-form").hidden = false;
   $("expression-meaning").focus();

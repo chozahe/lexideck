@@ -104,7 +104,7 @@ test("основные действия разделов доступны с к�
 
 test("системная палитра видна до JavaScript без вспышки противоположной темы", async ({ browser }) => {
   for (const [colorScheme, background, text] of [
-    ["light", "rgb(239, 241, 245)", "rgb(76, 79, 105)"],
+    ["light", "rgb(239, 241, 245)", "rgb(67, 70, 95)"],
     ["dark", "rgb(36, 39, 58)", "rgb(202, 211, 245)"]
   ]) {
     const context = await browser.newContext({ javaScriptEnabled: false, colorScheme });
