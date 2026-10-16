@@ -113,6 +113,19 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("пустое или неполное подключение API подсказывает настройку и локальный режим", async ({ page }) => {
+  await page.goto("/src/panel.html");
+  await expect(page.locator("#api-next-step")).toBeVisible();
+  await expect(page.locator("#api-next-step")).toContainText("укажите URL API, модель и ключ");
+  await expect(page.locator("#api-next-step a")).toHaveAttribute("href", "settings.html");
+  await expect(page.locator("#api-next-step")).toContainText("повторение и дневной лимит работают локально");
+
+  await page.evaluate(() => chrome.storage.local.set({ settings: { apiUrl: "https://api.example.com/v1", model: "", apiKey: "stored-locally" } }));
+  await expect(page.locator("#api-next-step")).toBeVisible();
+  await page.evaluate(() => chrome.storage.local.set({ settings: { apiUrl: "https://api.example.com/v1", model: "model", apiKey: "stored-locally" } }));
+  await expect(page.locator("#api-next-step")).toBeHidden();
+});
+
 test("пользователь получает перевод и значения слов по порядку через API", async ({ page, request }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
@@ -441,6 +454,37 @@ test("повторные нажатия и Ctrl+Enter во время запро
   await expect(page.locator("#sentence-translation")).toHaveText("Уникальный перевод");
 });
 
+test("новый текст не проигрывает старому при обратном порядке чтения настроек", async ({ page }) => {
+  await page.goto("/src/panel.html");
+  await configureApi(page);
+  await page.evaluate(() => chrome.storage.local.remove("pendingSelection"));
+  await page.reload();
+  await page.locator("#source-text").fill("Старый текст");
+  await page.evaluate(() => {
+    const get = chrome.storage.local.get.bind(chrome.storage.local);
+    window.__settingsReads = [];
+    window.__originalStorageGet = get;
+    chrome.storage.local.get = (key) => key === "settings" && window.__settingsReads.length < 2
+      ? new Promise((resolve) => window.__settingsReads.push(resolve))
+      : get(key);
+  });
+  await page.route("**/v1/chat/completions", async (route) => {
+    const text = route.request().postDataJSON().messages[1].content;
+    await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ sentence_translation: `Перевод: ${text}`, words: [] }) } }] } });
+  });
+
+  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__settingsReads.length)).toBe(1);
+  await page.evaluate(() => chrome.storage.local.set({ pendingSelection: "Актуальный текст" }));
+  await expect.poll(() => page.evaluate(() => window.__settingsReads.length)).toBe(2);
+
+  await page.evaluate(async () => window.__settingsReads[1](await window.__originalStorageGet("settings")));
+  await page.evaluate(async () => window.__settingsReads[0](await window.__originalStorageGet("settings")));
+
+  await expect(page.locator("#sentence-translation")).toHaveText("Перевод: Актуальный текст");
+  expect(await page.locator("#result-source").textContent()).toBe("Исходный текст этого перевода: Актуальный текст");
+});
+
 test("ожидающий запрос можно отменить до получения ответа", async ({ page }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
@@ -579,6 +623,34 @@ test("распознавание показывает ожидание и оши
   await expect(page.locator("#error")).toContainText("Сервис API временно недоступен");
   expect(await page.evaluate(() => Object.keys(window.__chromeValues))).not.toContain("pendingComicRequest");
   expect(await page.evaluate(() => JSON.stringify(window.__chromeValues))).not.toContain("data:image");
+  await expect(page.locator("#retry-comic")).toBeVisible();
+  await expect(page.locator("#retry-comic")).toBeFocused();
+});
+
+test("после отмены распознавания можно повторно выбрать область из панели", async ({ page }) => {
+  await prepareComicPanel(page);
+  let finishVision;
+  let visionStarted;
+  const started = new Promise((resolve) => { visionStarted = resolve; });
+  await page.route("**/v1/chat/completions", async (route) => {
+    visionStarted();
+    await new Promise((resolve) => { finishVision = resolve; });
+    try { await route.fulfill({ status: 503, json: { error: "Не удалось распознать реплику" } }); } catch {}
+  });
+  await page.evaluate((request) => chrome.storage.session.set({ pendingComicRequest: request }), comicRequest("cancelled-image"));
+  await started;
+  await page.getByRole("button", { name: "Отменить перевод" }).click();
+  await expect(page.locator("#retry-comic")).toBeVisible();
+  await expect(page.locator("#retry-comic")).toBeFocused();
+
+  await page.evaluate(() => {
+    window.__reselectMessages = [];
+    chrome.runtime = { sendMessage: async (message) => { window.__reselectMessages.push(message); } };
+  });
+  await page.getByRole("button", { name: "Выбрать область заново" }).click();
+  await expect(page.locator("#retry-comic")).toBeFocused();
+  expect(await page.evaluate(() => window.__reselectMessages)).toEqual([{ type: "LEXIDECK_RESELECT_COMIC" }]);
+  finishVision();
 });
 
 test("новый текст и новая область заменяют запоздалое распознавание", async ({ page }) => {

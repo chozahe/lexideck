@@ -77,6 +77,11 @@ async function currentSettings() {
   return { ...DEFAULT_SETTINGS, ...settings };
 }
 
+async function refreshApiNextStep() {
+  const settings = await currentSettings();
+  $("api-next-step").hidden = Boolean(settings.apiUrl.trim() && settings.model.trim() && settings.apiKey.trim());
+}
+
 function parseCompletion(content, sourceText) {
   const cleaned = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   let result;
@@ -165,6 +170,7 @@ async function extractComicText(image, signal) {
 let comicRequestId;
 let comicRequestToken;
 let handledComicRequestId;
+let comicRetryAvailable = false;
 
 async function consumePendingComic(request) {
   if (!request) return;
@@ -172,6 +178,7 @@ async function consumePendingComic(request) {
     translationController?.abort();
     activeTranslation = undefined;
     comicRequestId = request.id;
+    comicRetryAvailable = true;
     comicRequestToken = ++translationRequest;
     $("source-text").value = "";
     translatedSourceText = "";
@@ -197,6 +204,8 @@ async function consumePendingComic(request) {
   if (request.state === "error") {
     $("comic-status").textContent = "";
     showError(request.error);
+    $("retry-comic").hidden = false;
+    $("retry-comic").focus();
     return;
   }
   if (request.state !== "image") return;
@@ -220,6 +229,8 @@ async function consumePendingComic(request) {
     translationController = undefined;
     $("comic-status").textContent = "";
     if (error.name !== "AbortError") showApiError(error);
+    $("retry-comic").hidden = false;
+    $("retry-comic").focus();
   }
 }
 
@@ -456,18 +467,25 @@ let translationRequest = 0;
 let translationController;
 let activeTranslation;
 
-async function runTranslation(existingRequest) {
+function runTranslation(existingRequest, force = false) {
   const text = $("source-text").value.trim();
-  if (!text) return showError("Введите текст или выберите его на странице.");
-  const config = await currentSettings();
-  const key = JSON.stringify([text, config.apiUrl, config.apiKey, config.model, config.sourceLanguage, config.targetLanguage]);
-  if (existingRequest === undefined && activeTranslation?.key === key) return activeTranslation.promise;
+  if (!text) {
+    showError("Введите текст или выберите его на странице.");
+    return Promise.resolve();
+  }
+  if (existingRequest === undefined && !force && activeTranslation?.text === text) {
+    const pending = activeTranslation;
+    if (!pending.key) return pending.promise;
+    return currentSettings().then((config) => {
+      if (activeTranslation !== pending) return;
+      const key = JSON.stringify([text, config.apiUrl, config.apiKey, config.model, config.sourceLanguage, config.targetLanguage]);
+      return key === pending.key ? pending.promise : runTranslation(undefined, true);
+    });
+  }
   const request = existingRequest ?? ++translationRequest;
   if (request !== translationRequest) return;
-  if (activeTranslation?.key === key) return activeTranslation.promise;
   translationController?.abort();
-  const controller = new AbortController();
-  translationController = controller;
+  activeTranslation = undefined;
   $("comic-status").textContent = "";
   showError("");
   $("error-details").hidden = true;
@@ -475,37 +493,51 @@ async function runTranslation(existingRequest) {
   $("expression-form").hidden = true;
   $("translate").textContent = "Переводим…";
   $("cancel-translation").hidden = false;
-  const promise = translate(text, controller.signal);
-  activeTranslation = { key, promise };
-  try {
-    const result = await promise;
-    if (request !== translationRequest || controller.signal.aborted) return;
-    renderResult(result, text);
-  } catch (error) {
-    if (request === translationRequest && error.name !== "AbortError") showApiError(error);
-  } finally {
-    if (request === translationRequest) {
-      refreshTranslationFreshness();
-      $("cancel-translation").hidden = true;
+  const promise = (async () => {
+    try {
+      const config = await currentSettings();
+      if (request !== translationRequest) return;
+      const key = JSON.stringify([text, config.apiUrl, config.apiKey, config.model, config.sourceLanguage, config.targetLanguage]);
+      const controller = new AbortController();
+      translationController = controller;
+      activeTranslation = { text, key, promise };
+      const result = await translate(text, controller.signal);
+      if (request !== translationRequest || controller.signal.aborted) return;
+      renderResult(result, text);
+    } catch (error) {
+      if (request === translationRequest && error.name !== "AbortError") showApiError(error);
+    } finally {
+      if (request === translationRequest) {
+        refreshTranslationFreshness();
+        $("cancel-translation").hidden = true;
+        $("translate").textContent = "Перевести";
+      }
+      if (activeTranslation?.promise === promise) activeTranslation = undefined;
+      if (translationController && request === translationRequest) translationController = undefined;
     }
-    if (translationController === controller) translationController = undefined;
-    if (activeTranslation?.promise === promise) activeTranslation = undefined;
-  }
+  })();
+  activeTranslation = { text, promise };
+  return promise;
 }
 
 $("translate").addEventListener("click", () => void runTranslation());
 $("confirm-comic").addEventListener("click", () => {
   $("confirm-comic").hidden = true;
   $("retry-comic").hidden = true;
+  comicRetryAvailable = false;
   $("translate").hidden = false;
   void runTranslation();
 });
 $("retry-comic").addEventListener("click", async () => {
   $("confirm-comic").hidden = true;
-  $("retry-comic").hidden = true;
-  $("translate").hidden = false;
+  $("retry-comic").hidden = false;
   $("comic-status").textContent = "Выберите область комикса на странице.";
-  await chrome.runtime.sendMessage({ type: "LEXIDECK_RESELECT_COMIC" });
+  $("retry-comic").focus();
+  try {
+    await chrome.runtime.sendMessage({ type: "LEXIDECK_RESELECT_COMIC" });
+  } catch (error) {
+    $("comic-status").textContent = `Не удалось начать выбор области: ${error.message}`;
+  }
 });
 $("cancel-translation").addEventListener("click", () => {
   ++translationRequest;
@@ -514,9 +546,11 @@ $("cancel-translation").addEventListener("click", () => {
   $("translate").textContent = "Перевести";
   $("translate").hidden = false;
   $("confirm-comic").hidden = true;
-  $("retry-comic").hidden = true;
+  $("retry-comic").hidden = !comicRetryAvailable;
   $("cancel-translation").hidden = true;
   $("comic-status").textContent = "Запрос отменён.";
+  if (comicRetryAvailable) $("retry-comic").focus();
+  else $("translate").focus();
 });
 $("source-text").addEventListener("select", updateSelectedExpression);
 $("source-text").addEventListener("keyup", updateSelectedExpression);
@@ -524,12 +558,14 @@ $("source-text").addEventListener("mouseup", updateSelectedExpression);
 $("source-text").addEventListener("input", updateSelectedExpression);
 $("source-text").addEventListener("input", () => {
   refreshTranslationFreshness();
-  if (!translationController) return;
-  if (activeTranslation && $("source-text").value.trim() === JSON.parse(activeTranslation.key)[0]) return;
+  if (activeTranslation && $("source-text").value.trim() === activeTranslation.text) return;
+  if (!activeTranslation && !translationController) return;
   ++translationRequest;
-  translationController.abort();
+  translationController?.abort();
   activeTranslation = undefined;
+  translationController = undefined;
   $("cancel-translation").hidden = true;
+  $("translate").textContent = "Перевести";
 });
 $("save-expression").addEventListener("click", () => {
   if (!selectedExpression) return;
@@ -552,6 +588,7 @@ $("source-text").addEventListener("keydown", (event) => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.settings) void refreshApiNextStep();
   if (areaName === "local" && changes.cards) void refreshWordSaveButtons();
   if (areaName === "local" && changes.pendingSelection?.newValue) {
     translationController?.abort();
@@ -566,6 +603,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 void (async () => {
+  void refreshApiNextStep();
   const { pendingSelection } = await chrome.storage.local.get("pendingSelection");
   if (pendingSelection) {
     $("source-text").value = pendingSelection;

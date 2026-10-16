@@ -128,6 +128,7 @@ test("карточка, сохранённая в панели, появляет
 
 test("1000 карточек индексируются целиком и просматриваются страницами по 50", async ({ page }) => {
   await page.goto("/src/vocabulary.html");
+  await expect(page.locator("#vocabulary-cards")).not.toHaveAttribute("aria-live");
   await page.evaluate(async () => {
     const cards = Array.from({ length: 1000 }, (_, i) => ({
       id: `card-${i}`,
@@ -140,8 +141,10 @@ test("1000 карточек индексируются целиком и про�
   const searchStarted = Date.now();
   await expect(page.locator("#vocabulary-cards details")).toHaveCount(50);
   await expect(page.locator("#vocabulary-page-status")).toHaveText("1 / 20 · карточек: 1000");
+  await expect(page.locator("#vocabulary-live-status")).toHaveText("Найдено карточек: 1000. Страница 1 из 20.");
   await page.getByLabel("Поиск по основной форме или значению").fill("NEEDLE AT THE END");
   await expect(page.locator("#vocabulary-cards summary")).toContainText("word-0997");
+  await expect(page.locator("#vocabulary-live-status")).toHaveText("Найдено карточек: 1. Страница 1 из 1.");
   const searchMs = Date.now() - searchStarted;
   await expect(page.locator("#vocabulary-cards .vocabulary-meaning")).toHaveCount(0);
   await page.getByLabel("Поиск по основной форме или значению").fill("word-099");
@@ -261,6 +264,7 @@ test("значение и контекст редактируются с отм�
   const card = page.locator('[data-card-id="editable"]');
   await card.locator("summary").click();
   await card.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await expect(page.getByLabel("Словоформа в контексте")).toHaveValue("took off");
   await page.getByLabel("Значение").fill("отстегнуть");
   await page.getByLabel("Контекст употребления").fill("She took off the old label.");
   await card.getByRole("button", { name: "Отмена" }).click();

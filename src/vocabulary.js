@@ -170,7 +170,7 @@ function openEditor(card, meaningIndex, selectedContextIndex = undefined) {
   meaningInput.value = originalText;
   meaningLabel.append(meaningInput);
   const formLabel = document.createElement("label");
-  formLabel.textContent = "Основная форма в контексте";
+  formLabel.textContent = "Словоформа в контексте";
   const contextForm = document.createElement("input");
   contextForm.name = "context-form";
   contextForm.required = true;
@@ -340,6 +340,7 @@ function renderVocabulary() {
   $("vocabulary-empty").hidden = snapshot.length > 0;
   $("vocabulary-no-results").hidden = snapshot.length === 0 || results.length > 0;
   $("vocabulary-count").textContent = `Найдено карточек: ${results.length}.`;
+  $("vocabulary-live-status").textContent = `Найдено карточек: ${results.length}. Страница ${page} из ${pageCount}.`;
   $("vocabulary-clear-search").hidden = !query;
   $("vocabulary-pagination").hidden = results.length <= PAGE_SIZE;
   $("vocabulary-page-status").textContent = `${page} / ${pageCount} · карточек: ${results.length}`;
