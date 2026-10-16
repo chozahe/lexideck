@@ -209,8 +209,8 @@ async function saveTranslatedWords(page) {
   await page.locator("#translate").click();
   await expect(page.locator("#word-meanings li")).toHaveCount(3);
   for (const row of await page.locator("#word-meanings li").all()) {
-    await row.getByRole("button", { name: "Сохранить", exact: true }).click();
-    await expect(row.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();
+    await row.getByRole("button", { name: /^(Сохранить|Добавить значение|Добавить контекст):/ }).click();
+    await expect(row.getByRole("status")).toContainText("Сохранено в словарь:");
   }
   await page.goto("/src/vocabulary.html");
   await expect(page.locator("#vocabulary-cards summary")).toContainText(["take off", "coat"]);

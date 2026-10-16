@@ -107,8 +107,9 @@ test("карточка, сохранённая в панели, появляет
   ]);
   await expect(vocabulary.locator("#vocabulary-empty")).toBeVisible();
 
-  await page.locator("#word-meanings li").filter({ hasText: "took off —" }).getByRole("button", { name: "Сохранить" }).click();
-  await expect(page.locator("#word-meanings li").filter({ hasText: "took off —" }).getByRole("button", { name: "Сохранено" })).toBeVisible();
+  const savedWord = page.locator("#word-meanings li").filter({ hasText: "took off —" });
+  await savedWord.getByRole("button", { name: "Сохранить: take off" }).click();
+  await expect(savedWord.getByRole("status")).toHaveText("Сохранено в словарь: take off.");
   await expect(vocabulary.locator("#vocabulary-cards summary")).toContainText("take off");
   await expect(vocabulary.locator("#vocabulary-empty")).toBeHidden();
   await expect(vocabulary.locator("#vocabulary-cards .vocabulary-meaning h3")).toBeHidden();

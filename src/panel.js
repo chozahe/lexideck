@@ -199,6 +199,8 @@ async function consumePendingComic(request) {
     comicRequestId = request.id;
     comicRequestToken = ++translationRequest;
     $("source-text").value = "";
+    translatedSourceText = "";
+    $("translation-status").textContent = "";
     $("result").hidden = true;
     $("expression-form").hidden = true;
     $("translate").textContent = "Перевести";
@@ -261,7 +263,22 @@ function appendUnique(target, values) {
   }
 }
 
-async function saveWord(word) {
+function findWordContext(cards, word, sourceText) {
+  const card = cards.find((item) => item.kind === "word" && normalizeTerm(item.headword) === normalizeTerm(word.lemma));
+  if (!card) return { state: "new", card };
+  const meaning = card.meanings.find((item) => normalizeTerm(item.text) === normalizeTerm(word.meaning));
+  if (!meaning) return { state: "meaning", card };
+  const contextExists = meaning.contexts.some((item) =>
+    normalizeTerm(item.form) === normalizeTerm(word.text) && normalizeTerm(item.text) === normalizeTerm(sourceText));
+  return { state: contextExists ? "saved" : "context", card };
+}
+
+async function wordSaveState(word, sourceText) {
+  const { cards = [] } = await chrome.storage.local.get("cards");
+  return findWordContext(cards, word, sourceText).state;
+}
+
+async function saveWord(word, sourceText) {
   await updateCards((cards) => {
     const headword = word.lemma.trim();
     let card = cards.find((item) => item.kind === "word" && normalizeTerm(item.headword) === normalizeTerm(headword));
@@ -276,11 +293,11 @@ async function saveWord(word) {
     }
     const context = {
       form: word.text,
-      text: translatedSourceText,
+      text: sourceText,
       start: word.start,
       end: word.end
     };
-    if (!meaning.contexts.some((item) => item.form === context.form && item.text === context.text && item.start === context.start && item.end === context.end)) {
+    if (!meaning.contexts.some((item) => normalizeTerm(item.form) === normalizeTerm(context.form) && normalizeTerm(item.text) === normalizeTerm(context.text))) {
       meaning.contexts.push(context);
     }
     appendUnique(meaning.examples, word.examples);
@@ -399,6 +416,8 @@ function cancelExpression() {
 
 function renderResult(result, sourceText) {
   translatedSourceText = sourceText;
+  $("result-source").textContent = `Исходный текст этого перевода: ${sourceText}`;
+  $("translation-status").textContent = "";
   $("sentence-translation").textContent = result.sentence_translation;
   const list = $("word-meanings");
   list.replaceChildren(...result.words.map((word) => {
@@ -407,21 +426,47 @@ function renderResult(result, sourceText) {
     label.textContent = `${word.text} — ${word.meaning}`;
     const save = document.createElement("button");
     save.type = "button";
-    save.textContent = "Сохранить";
+    save.dataset.saveWord = "true";
+    save.lexideckWord = word;
+    save.lexideckSourceText = sourceText;
+    const saveStatus = document.createElement("span");
+    saveStatus.className = "visually-hidden";
+    saveStatus.setAttribute("role", "status");
+    saveStatus.setAttribute("aria-live", "polite");
     save.addEventListener("click", async () => {
       save.disabled = true;
       try {
-        await saveWord(word);
-        save.textContent = "Сохранено";
+        await saveWord(word, sourceText);
+        saveStatus.textContent = `Сохранено в словарь: ${word.lemma}.`;
+        await refreshWordSaveButtons();
       } catch (error) {
         showError(`Не удалось сохранить карточку: ${error.message}`);
         save.disabled = false;
       }
     });
-    item.append(label, save);
+    item.append(label, save, saveStatus);
     return item;
   }));
+  void refreshWordSaveButtons();
   $("result").hidden = false;
+  refreshTranslationFreshness();
+}
+
+function refreshTranslationFreshness() {
+  const stale = Boolean(translatedSourceText) && $("source-text").value !== translatedSourceText;
+  $("translation-status").textContent = stale
+    ? `Перевод относится к предыдущей версии текста: ${translatedSourceText}. Обновите перевод после исправления.`
+    : "";
+  $("translate").textContent = stale ? "Обновить перевод" : "Перевести";
+}
+
+async function refreshWordSaveButtons() {
+  await Promise.all([...document.querySelectorAll("[data-save-word]")].map(async (button) => {
+    const state = await wordSaveState(button.lexideckWord, button.lexideckSourceText);
+    button.textContent = state === "saved" ? "Уже в словаре" : state === "meaning" ? "Добавить значение" : state === "context" ? "Добавить контекст" : "Сохранить";
+    button.disabled = state === "saved";
+    button.setAttribute("aria-label", `${button.textContent}: ${button.lexideckWord.lemma}`);
+  }));
 }
 
 let translationRequest = 0;
@@ -457,7 +502,7 @@ async function runTranslation(existingRequest) {
     if (request === translationRequest && error.name !== "AbortError") showApiError(error);
   } finally {
     if (request === translationRequest) {
-      $("translate").textContent = "Перевести";
+      refreshTranslationFreshness();
       $("cancel-translation").hidden = true;
     }
     if (translationController === controller) translationController = undefined;
@@ -495,12 +540,12 @@ $("source-text").addEventListener("keyup", updateSelectedExpression);
 $("source-text").addEventListener("mouseup", updateSelectedExpression);
 $("source-text").addEventListener("input", updateSelectedExpression);
 $("source-text").addEventListener("input", () => {
+  refreshTranslationFreshness();
   if (!translationController) return;
   if (activeTranslation && $("source-text").value.trim() === JSON.parse(activeTranslation.key)[0]) return;
   ++translationRequest;
-  translationController?.abort();
+  translationController.abort();
   activeTranslation = undefined;
-  $("translate").textContent = "Перевести";
   $("cancel-translation").hidden = true;
 });
 $("save-expression").addEventListener("click", () => {
@@ -518,6 +563,7 @@ $("source-text").addEventListener("keydown", (event) => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.cards) void refreshWordSaveButtons();
   if (areaName === "local" && changes.pendingSelection?.newValue) {
     translationController?.abort();
     activeTranslation = undefined;
@@ -525,6 +571,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     void chrome.storage.local.remove("pendingSelection");
     void runTranslation();
   }
+  if (areaName === "local" && changes.cards) void refreshWordSaveButtons();
   if (areaName === "session" && changes.pendingComicRequest?.newValue) {
     void consumePendingComic(changes.pendingComicRequest.newValue);
   }

@@ -121,7 +121,7 @@ test("пользователь получает перевод и значени
   await page.getByRole("button", { name: "Перевести" }).click();
 
   await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
-  await expect(page.locator("#word-meanings li > span")).toHaveText([
+  await expect(page.locator("#word-meanings li > span:not(.visually-hidden)")).toHaveText([
     "took off — сняла (одежду)",
     "coat — пальто, которое она сняла",
     "coat — пальто, которое она надела"
@@ -134,15 +134,79 @@ test("пользователь получает перевод и значени
   expect(call.body.messages[1].content).toBe("She took off her coat and wore her coat.");
 });
 
+test("устаревший перевод хранит свой исходный контекст и обновляется по исправленному тексту", async ({ page }) => {
+  await prepareAutomaticTranslation(page);
+  await page.goto("/src/panel.html");
+  await expect(page.locator("#sentence-translation")).toHaveText("Она сняла пальто и надела пальто.");
+  const oldText = "She took off her coat and wore her coat.";
+  await page.locator("#source-text").fill("Corrected source text");
+  await expect(page.locator("#translation-status")).toContainText(`предыдущей версии текста: ${oldText}`);
+  await expect(page.locator("#result-source")).toHaveText(`Исходный текст этого перевода: ${oldText}`);
+  await expect(page.getByRole("button", { name: "Обновить перевод" })).toBeVisible();
+
+  const oldResult = page.locator("#word-meanings li").filter({ hasText: "took off —" });
+  await oldResult.getByRole("button", { name: "Сохранить: take off" }).click();
+  await expect(oldResult.getByRole("status")).toHaveText("Сохранено в словарь: take off.");
+  const savedCards = await page.evaluate(() => chrome.storage.local.get("cards"));
+  expect(savedCards.cards[0].meanings[0].contexts[0].text).toBe(oldText);
+
+  let refreshedText;
+  await page.route("**/v1/chat/completions", async (route) => {
+    refreshedText = route.request().postDataJSON().messages[1].content;
+    await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ sentence_translation: "Обновлённый перевод", words: [] }) } }] } });
+  });
+  await page.getByRole("button", { name: "Обновить перевод" }).click();
+  await expect(page.locator("#sentence-translation")).toHaveText("Обновлённый перевод");
+  expect(refreshedText).toBe("Corrected source text");
+  await expect(page.locator("#translation-status")).toBeEmpty();
+  await expect(page.locator("#result-source")).toHaveText("Исходный текст этого перевода: Corrected source text");
+});
+
+test("состояние сохранения различает карточку, значение и контекст и обновляется из другой вкладки", async ({ page, context }) => {
+  const oldText = "She took off her coat and wore her coat.";
+  await page.addInitScript((sourceText) => {
+    localStorage.setItem("lexideck-test-storage", JSON.stringify({
+      settings: { apiUrl: `${location.origin}/v1`, model: "controlled-model", apiKey: "test-secret" },
+      pendingSelection: sourceText,
+      cards: [
+        { id: "expression-coat", kind: "expression", headword: "coat", meanings: [] },
+        { id: "coat", kind: "word", headword: "COAT", meanings: [{ text: "пальто, которое она сняла", contexts: [{ form: "COAT", text: sourceText.toLowerCase().replaceAll(" ", "  "), start: 17, end: 21 }], examples: [] }] },
+        { id: "take-off", kind: "word", headword: "take off", meanings: [{ text: "сняла (одежду)", contexts: [{ form: "TOOK OFF", text: "Earlier context", start: 0, end: 8 }], examples: [] }] }
+      ]
+    }));
+  }, oldText);
+  await page.goto("/src/panel.html");
+  await expect(page.locator("#sentence-translation")).toBeVisible();
+  const rows = page.locator("#word-meanings li");
+  await expect(rows.filter({ hasText: "took off —" }).getByRole("button")).toHaveAccessibleName("Добавить контекст: take off");
+  await expect(rows.filter({ hasText: "coat — пальто, которое она сняла" }).getByRole("button")).toHaveAccessibleName("Уже в словаре: coat");
+  const addMeaning = rows.filter({ hasText: "coat — пальто, которое она надела" }).getByRole("button");
+  await expect(addMeaning).toHaveAccessibleName("Добавить значение: coat");
+  await addMeaning.click();
+  await expect(addMeaning).toHaveAccessibleName("Уже в словаре: coat");
+  await expect(rows.filter({ hasText: "coat — пальто, которое она надела" }).getByRole("status")).toHaveText("Сохранено в словарь: coat.");
+
+  const secondTab = await context.newPage();
+  await secondTab.goto("/src/panel.html");
+  await secondTab.evaluate(({ sourceText }) => chrome.storage.local.set({ cards: [
+    { id: "coat", kind: "word", headword: "coat", meanings: [{ text: "пальто, которое она сняла", contexts: [{ form: "coat", text: sourceText.toUpperCase(), start: 0, end: 4 }], examples: [] }, { text: "пальто, которое она надела", contexts: [{ form: "coat", text: sourceText, start: 0, end: 4 }], examples: [] }] },
+    { id: "take-off", kind: "word", headword: "take off", meanings: [{ text: "сняла (одежду)", contexts: [{ form: "took off", text: sourceText, start: 0, end: 8 }], examples: [] }] }
+  ] }), { sourceText: oldText });
+  await expect(rows.filter({ hasText: "coat — пальто, которое она сняла" }).getByRole("button")).toHaveAccessibleName("Уже в словаре: coat");
+  await expect(rows.filter({ hasText: "took off —" }).getByRole("button")).toHaveAccessibleName("Уже в словаре: take off");
+  await secondTab.close();
+});
+
 test("пользователь сохраняет значения слова в одну локальную карточку и открывает её после перезагрузки словаря", async ({ page }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);
   await page.getByRole("button", { name: "Перевести" }).click();
 
   const coatRows = page.locator("#word-meanings li").filter({ hasText: "coat —" });
-  await coatRows.nth(0).getByRole("button", { name: "Сохранить" }).click();
-  await coatRows.nth(1).getByRole("button", { name: "Сохранить" }).click();
-  await expect(coatRows.getByRole("button", { name: "Сохранено", exact: true })).toHaveCount(2);
+  await coatRows.nth(0).getByRole("button", { name: "Сохранить: coat" }).click();
+  await coatRows.nth(1).getByRole("button", { name: "Добавить значение: coat" }).click();
+  await expect(coatRows.getByRole("status")).toHaveCount(2);
+  await expect(coatRows.getByRole("status").nth(0)).toHaveText("Сохранено в словарь: coat.");
 
   await page.goto("/src/vocabulary.html");
   await expect(page.locator("#vocabulary-cards details")).toHaveCount(1);
@@ -164,8 +228,8 @@ test("пользователь сохраняет словоформу под о
   await expect(page.locator("#word-meanings li")).toHaveCount(3);
   await page.locator("#source-text").fill("Edited after translation");
   const phrasalVerb = page.locator("#word-meanings li").filter({ hasText: "took off —" });
-  await phrasalVerb.getByRole("button", { name: "Сохранить" }).click();
-  await expect(phrasalVerb.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();
+  await phrasalVerb.getByRole("button", { name: "Сохранить: take off" }).click();
+  await expect(phrasalVerb.getByRole("status")).toHaveText("Сохранено в словарь: take off.");
 
   await page.goto("/src/vocabulary.html");
   const card = page.locator("#vocabulary-cards details");
@@ -388,7 +452,7 @@ test("выделенный текст переводится автоматич�
   await expect(page.locator("#source-text")).toHaveValue("She took off her coat and wore her coat.");
   await request.post("/__test/error");
   await page.locator("#source-text").fill("Corrected text");
-  await page.getByRole("button", { name: "Перевести", exact: true }).click();
+  await page.getByRole("button", { name: "Обновить перевод", exact: true }).click();
   await expect(page.locator("#result")).toBeHidden();
   await expect(page.locator("#error")).toContainText("Ключ API отклонён");
 });

@@ -103,6 +103,8 @@ section > button { width: 100%; margin-top: 8px; }
 #word-meanings { padding-left: 24px; }
 #word-meanings li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; }
 #word-meanings button { flex: none; padding: 6px 10px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 #vocabulary-cards h3 { margin: 0 0 6px; font-size: 1rem; }
 #vocabulary-cards ul { margin: 4px 0; padding-left: 20px; }
 .vocabulary-card { display: block; padding: 13px 2px; border-top: 1px solid var(--border); }

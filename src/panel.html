@@ -36,12 +36,14 @@
         <button id="confirm-comic" type="button" hidden>Подтвердить текст и перевести</button>
         <button id="retry-comic" class="subtle" type="button" hidden>Выбрать область заново</button>
         <button id="cancel-translation" class="subtle" type="button" hidden>Отменить перевод</button>
+        <p id="translation-status" role="status" aria-live="polite"></p>
         <p id="error" role="alert"></p>
         <details id="error-details" hidden><summary>Технические подробности</summary><pre id="error-detail"></pre></details>
       </section>
 
       <section id="result" aria-live="polite" hidden>
         <h2>Перевод</h2>
+        <p id="result-source"></p>
         <p id="sentence-translation"></p>
         <h2>Слова по порядку</h2>
         <ol id="word-meanings"></ol>
