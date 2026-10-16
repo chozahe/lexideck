@@ -560,7 +560,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     void chrome.storage.local.remove("pendingSelection");
     void runTranslation();
   }
-  if (areaName === "local" && changes.cards) void refreshWordSaveButtons();
   if (areaName === "session" && changes.pendingComicRequest?.newValue) {
     void consumePendingComic(changes.pendingComicRequest.newValue);
   }

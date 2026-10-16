@@ -170,9 +170,13 @@ $("test-api").addEventListener("click", async () => {
   } catch (error) {
     if (request !== apiTestRequest || testedSnapshot !== apiSnapshot()) return;
     apiTestSnapshot = null;
-    status.textContent = `Проверка не пройдена: ${error.message} Проверьте URL, модель и права ключа; технический ответ доступен отдельно.`;
+    const errorMessage = error instanceof SyntaxError
+      ? "Сервис вернул некорректный JSON-ответ."
+      : String(error.message || "Неизвестная ошибка.").replaceAll(key, "[ключ скрыт]");
+    const technicalDetail = String(error.detail || error.message || "Неизвестная ошибка.").replaceAll(key, "[ключ скрыт]");
+    status.textContent = `Проверка не пройдена: ${errorMessage} Проверьте URL, модель и права ключа; технический ответ доступен отдельно.`;
     status.dataset.state = "error";
-    $("api-test-detail").textContent = error.detail || error.message;
+    $("api-test-detail").textContent = technicalDetail;
     $("api-test-details").hidden = false;
   } finally {
     if (request === apiTestRequest) button.disabled = false;

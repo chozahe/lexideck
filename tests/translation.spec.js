@@ -323,6 +323,24 @@ test("генерация примеров удаляет повторы из о�
   await expect.poll(() => page.evaluate(async () => (await chrome.storage.local.get("cards")).cards[0].meanings[0].examples)).toEqual(["Same example.", "Second example."]);
 });
 
+test("генерация отклоняет примеры, дублирующиеся без учёта регистра", async ({ page }) => {
+  await configureApi(page);
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "case-duplicate-examples", kind: "expression", headword: "take off",
+    meanings: [{ text: "снять", contexts: [{ form: "took off", text: "She took off her coat." }], examples: [] }]
+  }] }));
+  await page.goto("/src/vocabulary.html");
+  await page.route("**/v1/chat/completions", (route) => route.fulfill({ json: { choices: [{ message: {
+    content: JSON.stringify({ examples: ["Same example.", "same example."] })
+  } }] } }));
+  const card = page.locator('[data-card-id="case-duplicate-examples"]');
+  await card.locator("summary").click();
+  await card.getByRole("button", { name: "Добавить примеры модели" }).click();
+  await expect(page.locator("#vocabulary-status")).toContainText("меньше двух уникальных примеров");
+  const saved = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards[0].meanings[0].examples);
+  expect(saved).toEqual([]);
+});
+
 test("отмена запроса примеров закрывает форму и блокирует позднее сохранение выражения", async ({ page }) => {
   await page.goto("/src/panel.html");
   await configureApi(page);

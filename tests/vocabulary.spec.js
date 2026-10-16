@@ -206,6 +206,36 @@ test("URL сохраняет поиск, страницу и раскрытие,
   await expect(page.locator("#vocabulary-page-status")).toHaveText("2 / 3 · карточек: 120");
 });
 
+test("раскрытие карточки синхронно сохраняет URL и Back/Forward восстанавливает URL и DOM", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "history-card", kind: "word", headword: "history",
+    meanings: [{ text: "история", contexts: [], examples: [] }]
+  }] }));
+  const card = page.locator('[data-card-id="history-card"]');
+  const summary = card.locator("summary");
+
+  await summary.click();
+  await expect(card).toHaveAttribute("open", "");
+  await expect(page).toHaveURL(/open=history-card/);
+  await summary.click();
+  await expect(card).not.toHaveAttribute("open", "");
+  await expect(page).not.toHaveURL(/open=history-card/);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/open=history-card/);
+  await expect(card).toHaveAttribute("open", "");
+  await page.goForward();
+  await expect(page).not.toHaveURL(/open=history-card/);
+  await expect(card).not.toHaveAttribute("open", "");
+
+  await page.goBack();
+  await expect(card).toHaveAttribute("open", "");
+  await page.reload();
+  await expect(page).toHaveURL(/open=history-card/);
+  await expect(page.locator('[data-card-id="history-card"]')).toHaveAttribute("open", "");
+});
+
 test("некорректные страницы и удалённые id раскрытия восстанавливаются безопасно", async ({ page }) => {
   await page.goto("/src/vocabulary.html");
   await page.evaluate(async () => chrome.storage.local.set({ cards: [
@@ -305,6 +335,37 @@ test("отказ закрыть изменённый редактор сохра
   await card.locator("summary").click();
   await expect(card).toHaveAttribute("open", "");
   await expect(page.getByLabel("Значение")).toHaveValue("черновик");
+});
+
+test("закрытие изменённого редактора показывает один confirm и отказ сохраняет черновик", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [{
+    id: "single-confirm", kind: "word", headword: "word",
+    meanings: [{ text: "значение", contexts: [{ form: "word", text: "Исходный контекст." }], examples: [] }]
+  }] }));
+  const card = page.locator('[data-card-id="single-confirm"]');
+  await card.locator("summary").click();
+  const responses = ["accept", "dismiss"];
+  const messages = [];
+  page.on("dialog", async (dialog) => {
+    messages.push(dialog.message());
+    if (responses.shift() === "accept") await dialog.accept();
+    else await dialog.dismiss();
+  });
+
+  await card.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await page.getByLabel("Значение").fill("принятый черновик");
+  await card.locator("summary").click();
+  await expect(card).not.toHaveAttribute("open", "");
+  expect(messages).toHaveLength(1);
+
+  await card.locator("summary").click();
+  await card.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await page.getByLabel("Значение").fill("сохранить при отказе");
+  await card.locator("summary").click();
+  await expect(card).toHaveAttribute("open", "");
+  await expect(page.getByLabel("Значение")).toHaveValue("сохранить при отказе");
+  expect(messages).toHaveLength(2);
 });
 
 test("удаление карточки отменяется без изменений или подтверждается и убирает её из занятия", async ({ page, context }) => {

@@ -26,7 +26,16 @@ export async function requestExamples(headword, meaning, context, config, { sign
   if (!Array.isArray(examples) || examples.length < 2 || examples.length > 3 || examples.some((item) => typeof item !== "string" || !item.trim())) {
     throw new Error("Модель вернула некорректный список примеров.");
   }
-  const unique = [...new Set(examples.map((item) => item.trim()).filter(Boolean))];
+  const unique = [];
+  const seen = new Set();
+  for (const item of examples) {
+    const clean = item.trim();
+    const normalized = clean.toLocaleLowerCase();
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      unique.push(clean);
+    }
+  }
   if (unique.length < 2) throw new Error("Модель вернула меньше двух уникальных примеров.");
   return unique;
 }

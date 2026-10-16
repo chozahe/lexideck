@@ -177,6 +177,25 @@ test("ошибка API не показывает ключ в основном с
   await expect(page.locator("#api-test-detail")).not.toContainText("invalid api key");
 });
 
+test("HTTP 200 с некорректным JSON не раскрывает ключ API", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  await page.locator("#api-url").fill(new URL("/v1", page.url()).origin + "/v1");
+  await page.locator("#model").fill("malformed-model");
+  await page.locator("#api-key").fill("probe-secret");
+  await page.route("**/v1/chat/completions", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: '{"error":"probe-secret'
+  }));
+
+  await page.getByRole("button", { name: "Проверить подключение" }).click();
+  await expect(page.locator("#api-test-status")).toContainText("некорректный JSON-ответ");
+  await expect(page.locator("#api-test-status")).not.toContainText("probe-secret");
+  await expect(page.locator("#api-test-details")).toBeVisible();
+  await page.locator("#api-test-details summary").click();
+  await expect(page.locator("#api-test-detail")).not.toContainText("probe-secret");
+});
+
 test("общий API timeout охватывает чтение позднего тела ответа", async ({ page }) => {
   await page.goto("/src/settings.html");
   const result = await page.evaluate(async () => {

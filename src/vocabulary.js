@@ -134,14 +134,9 @@ async function generateExamples(card, meaning, button) {
       if (!currentMeaning) return;
       const existing = new Set((currentMeaning.examples || []).map((item) => item.trim().toLocaleLowerCase()));
       currentMeaning.examples ||= [];
-      for (const example of examples) {
-        const clean = example.trim();
-        const normalized = clean.toLocaleLowerCase();
-        if (!existing.has(normalized)) {
-          currentMeaning.examples.push(clean);
-          existing.add(normalized);
-        }
-      }
+      const additions = examples.filter((example) => !existing.has(example.trim().toLocaleLowerCase()));
+      if (additions.length < 2) throw new Error("Модель вернула меньше двух новых уникальных примеров.");
+      currentMeaning.examples.push(...additions);
     });
   } catch (error) {
     $("vocabulary-status").textContent = "Не удалось добавить примеры: " + error.message;
@@ -277,17 +272,16 @@ function makeNode(card) {
     } else expandedIds.delete(details.dataset.cardId);
   });
   summary.addEventListener("click", (event) => {
-    if (details.open && editing?.cardId === card.id && editing.dirty && !window.confirm("Отменить несохранённые изменения карточки?")) {
+    if (details.open && editing?.cardId === card.id && !leaveEditor()) {
       event.preventDefault();
-      editing.form?.querySelector('input[name="meaning"]')?.focus();
+      editing?.form?.querySelector('input[name="meaning"]')?.focus();
       return;
     }
-    if (details.open && editing?.cardId === card.id) leaveEditor();
-    queueMicrotask(() => {
+    setTimeout(() => {
       if (details.open) expandedIds.add(card.id);
       else expandedIds.delete(card.id);
       writeUrlState("push");
-    });
+    }, 0);
   });
   const record = { details, headword, status, content, signature: "" };
   updateNode(card, record);
