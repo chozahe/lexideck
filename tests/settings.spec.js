@@ -1,5 +1,18 @@
 const { test, expect } = require("@playwright/test");
 
+test("настройки помечают URL с пробелом или некорректным host как неполное подключение", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  const url = page.locator("#api-url");
+  await url.fill("https://bad host/v1");
+  await expect(url).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator("#api-readiness")).toContainText("корректный URL API");
+  await expect(page.locator("#api-url-error")).toContainText("Укажите полный");
+
+  await url.fill("https://[bad]/v1");
+  await expect(url).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator("#api-readiness")).toContainText("корректный URL API");
+});
+
 test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });

@@ -1,5 +1,5 @@
 import "./theme.js";
-import { completionEndpoint, DEFAULT_SETTINGS } from "./settings.js";
+import { completionEndpoint, DEFAULT_SETTINGS, isValidApiUrl } from "./settings.js";
 import { requestApi } from "./api-request.js";
 
 const $ = (id) => document.getElementById(id);
@@ -49,12 +49,11 @@ function updateApiReadiness() {
   let urlIsValid = !url;
   const urlError = $("api-url-error");
   if (url) {
-    try {
-      new URL(completionEndpoint(url));
+    if (isValidApiUrl(url)) {
       urlIsValid = true;
       fields.apiUrl.removeAttribute("aria-invalid");
       urlError.textContent = "";
-    } catch {
+    } else {
       urlError.textContent = "Укажите полный http:// или https:// адрес сервиса либо endpoint /chat/completions.";
       fields.apiUrl.setAttribute("aria-invalid", "true");
     }
@@ -113,8 +112,8 @@ $("test-api").addEventListener("click", async () => {
   let endpoint;
   try {
     if (!url) throw new Error("Введите URL сервиса.");
+    if (!isValidApiUrl(url)) throw new Error("Укажите полный http:// или https:// адрес сервиса либо endpoint /chat/completions.");
     endpoint = completionEndpoint(url);
-    new URL(endpoint);
   } catch (error) {
     endpoint = undefined;
     errors.apiUrl.textContent = `${error.message} Допустимы адреса http:// и https://.`;

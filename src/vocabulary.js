@@ -11,6 +11,7 @@ let snapshot = [];
 let index = [];
 let query = "";
 let page = 1;
+let renderedPage = 1;
 let expandedIds = new Set();
 const nodes = new Map();
 let editing;
@@ -311,10 +312,17 @@ function updateNode(card, record) {
 function renderVocabulary() {
   const results = index.filter((entry) => !query || entry.text.includes(query));
   const pageCount = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
-  page = Math.min(Math.max(page, 1), pageCount);
-  const pageCards = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((entry) => entry.card);
   const container = $("vocabulary-cards");
   const activeCard = document.activeElement?.closest?.(".vocabulary-card")?.dataset.cardId;
+  const activePosition = activeCard ? [...container.children].findIndex((child) => child.dataset.cardId === activeCard) : -1;
+  const activeWasDeleted = activeCard && !snapshot.some((card) => card.id === activeCard);
+  let fallbackGlobalIndex;
+  if (activeWasDeleted && activePosition >= 0 && results.length) {
+    fallbackGlobalIndex = Math.min((renderedPage - 1) * PAGE_SIZE + activePosition, results.length - 1);
+    page = Math.floor(fallbackGlobalIndex / PAGE_SIZE) + 1;
+  }
+  page = Math.min(Math.max(page, 1), pageCount);
+  const pageCards = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((entry) => entry.card);
   const pageIds = new Set(pageCards.map((card) => card.id));
   for (const id of [...expandedIds]) if (!snapshot.some((card) => card.id === id)) expandedIds.delete(id);
 
@@ -347,8 +355,12 @@ function renderVocabulary() {
   $("vocabulary-previous").disabled = page <= 1;
   $("vocabulary-next").disabled = page >= pageCount;
   writeUrlState("replace");
+  renderedPage = page;
   if (activeCard && !pageIds.has(activeCard)) {
-    const replacement = pageCards[Math.min((results.findIndex((entry) => entry.card.id === activeCard) % PAGE_SIZE + PAGE_SIZE) % PAGE_SIZE, pageCards.length - 1)];
+    const position = fallbackGlobalIndex === undefined
+      ? Math.min(Math.max(activePosition, 0), pageCards.length - 1)
+      : fallbackGlobalIndex - (page - 1) * PAGE_SIZE;
+    const replacement = pageCards[Math.min(Math.max(position, 0), pageCards.length - 1)];
     (replacement && nodes.get(replacement.id)?.details.querySelector("summary") || $("vocabulary-search")).focus();
   }
 }

@@ -160,6 +160,47 @@ test("1000 карточек индексируются целиком и про�
   console.log(`Профиль словаря (1000 карточек): поиск ${searchMs} мс; 19 переходов и раскрытие ${navigationMs} мс; ${await page.evaluate(() => navigator.userAgent)}.`);
 });
 
+test("удаление активной карточки сохраняет ближайшую позицию и корректирует последнюю страницу", async ({ page, context }) => {
+  const cards = Array.from({ length: 51 }, (_, i) => ({
+    id: `focus-${i}`,
+    kind: "word",
+    headword: `word-${String(i).padStart(2, "0")}`,
+    meanings: [{ text: `meaning-${i}`, contexts: [], examples: [] }]
+  }));
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async (nextCards) => chrome.storage.local.set({ cards: nextCards }), cards);
+  await expect(page.locator("#vocabulary-cards details")).toHaveCount(50);
+  await page.locator('[data-card-id="focus-0"] summary').focus();
+
+  const other = await context.newPage();
+  await other.goto("/src/vocabulary.html");
+  await other.evaluate(async () => {
+    const { cards: current } = await chrome.storage.local.get("cards");
+    await chrome.storage.local.set({ cards: current.filter((card) => card.id !== "focus-0") });
+  });
+  await expect(page.locator('[data-card-id="focus-1"] summary')).toBeFocused();
+
+  await page.evaluate(async (nextCards) => chrome.storage.local.set({ cards: nextCards }), cards);
+  await page.locator('[data-card-id="focus-25"] summary').focus();
+  await other.evaluate(async () => {
+    const { cards: current } = await chrome.storage.local.get("cards");
+    await chrome.storage.local.set({ cards: current.filter((card) => card.id !== "focus-25") });
+  });
+  await expect(page.locator('[data-card-id="focus-26"] summary')).toBeFocused();
+
+  await page.evaluate(async (nextCards) => chrome.storage.local.set({ cards: nextCards }), cards);
+  await page.getByRole("button", { name: "Вперёд" }).click();
+  await expect(page.locator("#vocabulary-cards details")).toHaveCount(1);
+  await page.locator('[data-card-id="focus-50"] summary').focus();
+  await other.evaluate(async () => {
+    const { cards: current } = await chrome.storage.local.get("cards");
+    await chrome.storage.local.set({ cards: current.filter((card) => card.id !== "focus-50") });
+  });
+  await expect(page.locator('[data-card-id="focus-49"] summary')).toBeFocused();
+  await expect(page.locator("#vocabulary-page-status")).toHaveText("1 / 1 · карточек: 50");
+  await other.close();
+});
+
 test("изменение другой вкладкой сохраняет раскрытие и фокус по id", async ({ page, context }) => {
   await page.goto("/src/vocabulary.html");
   await page.evaluate(async () => chrome.storage.local.set({ cards: [

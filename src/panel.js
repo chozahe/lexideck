@@ -1,5 +1,5 @@
 import "./theme.js";
-import { completionEndpoint, DEFAULT_SETTINGS } from "./settings.js";
+import { completionEndpoint, DEFAULT_SETTINGS, isValidApiUrl } from "./settings.js";
 import { updateCards } from "./cards.js";
 import { requestExamples } from "./examples.js";
 import { requestApi } from "./api-request.js";
@@ -83,11 +83,7 @@ async function refreshApiNextStep() {
   const request = ++apiNextStepRequest;
   const settings = await currentSettings();
   if (request !== apiNextStepRequest) return;
-  let validApiUrl = false;
-  try {
-    completionEndpoint(settings.apiUrl);
-    validApiUrl = true;
-  } catch {}
+  const validApiUrl = isValidApiUrl(settings.apiUrl);
   $("api-next-step").hidden = Boolean(validApiUrl && settings.model.trim() && settings.apiKey.trim());
 }
 

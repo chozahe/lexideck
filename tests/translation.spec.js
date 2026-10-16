@@ -126,7 +126,7 @@ test("пустое или неполное подключение API подск
   await expect(page.locator("#api-next-step")).toBeHidden();
 });
 
-test("подсказка API игнорирует устаревшее чтение настроек и показывает неверный URL", async ({ page }) => {
+test("подсказка API учитывает порядок чтения и валидность URL", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("lexideck-test-storage", JSON.stringify({ settings: {} })));
   await page.route("**/__test/chrome-mock.js", async (route) => {
     const response = await route.fetch();
@@ -154,6 +154,16 @@ test("подсказка API игнорирует устаревшее чтен�
   await page.evaluate(() => chrome.storage.local.set({ settings: { apiUrl: "api.example.com/v1", model: "model", apiKey: "local-key" } }));
   await expect.poll(() => page.evaluate(() => window.__settingsGetQueue.length)).toBe(3);
   await page.evaluate(() => window.__settingsGetQueue[2]());
+  await expect(page.locator("#api-next-step")).toBeVisible();
+
+  await page.evaluate(() => chrome.storage.local.set({ settings: { apiUrl: "http://bad host/v1", model: "model", apiKey: "local-key" } }));
+  await expect.poll(() => page.evaluate(() => window.__settingsGetQueue.length)).toBe(4);
+  await page.evaluate(() => window.__settingsGetQueue[3]());
+  await expect(page.locator("#api-next-step")).toBeVisible();
+
+  await page.evaluate(() => chrome.storage.local.set({ settings: { apiUrl: "http://[bad]/v1", model: "model", apiKey: "local-key" } }));
+  await expect.poll(() => page.evaluate(() => window.__settingsGetQueue.length)).toBe(5);
+  await page.evaluate(() => window.__settingsGetQueue[4]());
   await expect(page.locator("#api-next-step")).toBeVisible();
 });
 
