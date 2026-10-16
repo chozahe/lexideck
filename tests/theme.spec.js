@@ -119,3 +119,12 @@ test("системная палитра видна до JavaScript без всп
     }
   }
 });
+
+test("ошибка сохранения темы видна как ошибка с контрастным текстом", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  await page.evaluate(() => localStorage.setItem("lexideck-test-storage-fail-set", "true"));
+  await page.locator("#theme-preference").selectOption("macchiato");
+  await expect(page.locator("#theme-status")).toContainText("Не удалось сохранить тему");
+  await expect(page.locator("#theme-status")).toHaveAttribute("data-state", "error");
+  await expect(page.locator("#theme-status")).toHaveCSS("color", "rgb(176, 0, 32)");
+});

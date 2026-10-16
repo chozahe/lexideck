@@ -50,7 +50,7 @@ test("активные основные кнопки и статусы имею�
     }
     await page.goto("/src/settings.html");
     await page.locator("#theme-preference").selectOption(theme);
-    for (const [selector, state] of [["#theme-status", "success"], ["#settings-status", "error"], ["#api-test-status", "error"]]) {
+    for (const [selector, state] of [["#theme-status", "success"], ["#settings-status", "error"], ["#api-test-status", "error"], ["#api-test-status", "pending"]]) {
       const color = await page.locator(selector).evaluate((element, value) => {
         element.dataset.state = value;
         element.textContent = "Проверочное состояние";
@@ -58,5 +58,10 @@ test("активные основные кнопки и статусы имею�
       }, state);
       expect(contrast(color.foreground, color.background), `${theme} ${selector} ${state}`).toBeGreaterThanOrEqual(4.5);
     }
+    const neutral = await page.goto("/src/vocabulary.html").then(() => page.locator("#backup-status").evaluate((element) => ({
+      foreground: getComputedStyle(element).color,
+      background: getComputedStyle(document.querySelector("section")).backgroundColor
+    })));
+    expect(contrast(neutral.foreground, neutral.background), `${theme} neutral status`).toBeGreaterThanOrEqual(4.5);
   }
 });
