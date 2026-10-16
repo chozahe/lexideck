@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const fs = require("node:fs/promises");
 
 test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
@@ -7,6 +8,7 @@ test.beforeEach(async ({ request }) => {
 test("поиск находит основную форму и значение, а карточка раскрывает сохранённые детали", async ({ page }) => {
   await page.goto("/src/vocabulary.html");
   await expect(page.locator("#vocabulary-empty")).toBeVisible();
+  await expect(page.locator("#vocabulary-empty")).toContainText("Сохраните слово после перевода");
   await expect(page.locator("#vocabulary-no-results")).toBeHidden();
 
   await page.evaluate(async () => {
@@ -62,9 +64,11 @@ test("поиск находит основную форму и значение,
 
   await page.getByLabel("Поиск по основной форме или значению").fill("нет такого слова");
   await expect(cards).toHaveCount(0);
+  await expect(page.locator("#vocabulary-count")).toHaveText("Найдено карточек: 0.");
   await expect(page.locator("#vocabulary-no-results")).toBeVisible();
 
-  await page.getByLabel("Поиск по основной форме или значению").fill("");
+  await page.getByRole("button", { name: "Сбросить поиск" }).click();
+  await expect(page.getByLabel("Поиск по основной форме или значению")).toHaveValue("");
   await expect(cards).toHaveCount(2);
   const firstSummary = cards.nth(0).locator("summary");
   await firstSummary.focus();
@@ -201,4 +205,126 @@ test("некорректные страницы и удалённые id рас�
   await expect(page).not.toHaveURL(/page=|open=deleted/);
   await page.getByLabel("Поиск по основной форме или значению").fill("ничего");
   await expect(page.locator("#vocabulary-page-status")).toHaveText("1 / 1 · карточек: 0");
+});
+
+test("значение и контекст редактируются с отменой, защитой ухода и сохранением FSRS в backup", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  const original = {
+    id: "editable", kind: "expression", headword: "take off",
+    meanings: [{ text: "снять", contexts: [{ form: "took off", text: "She took off her coat.", start: 4, end: 12 }], examples: ["Take off your shoes."] }],
+    schedule: { due: "2026-10-20T12:00:00.000Z", stability: 3, difficulty: 5, elapsed_days: 2, scheduled_days: 6, reps: 7, lapses: 1, state: 2, last_review: "2026-10-14T12:00:00.000Z" },
+    reviewHistory: [{ rating: 3, meaningIndex: 0 }], nextMeaning: 0
+  };
+  await page.evaluate(async (card) => chrome.storage.local.set({ cards: [card] }), original);
+  const card = page.locator('[data-card-id="editable"]');
+  await card.locator("summary").click();
+  await card.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await page.getByLabel("Значение").fill("отстегнуть");
+  await page.getByLabel("Контекст употребления").fill("She took off the old label.");
+  await card.getByRole("button", { name: "Отмена" }).click();
+  await expect(page.getByLabel("Контекст употребления")).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(async () => (await chrome.storage.local.get("cards")).cards[0].meanings[0].text)).toBe("снять");
+
+  await card.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await page.getByLabel("Значение").fill("снять одежду");
+  await page.getByLabel("Контекст употребления").fill("She took off her warm coat.");
+  const navigationBlocked = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    return !window.dispatchEvent(event) && event.defaultPrevented;
+  });
+  expect(navigationBlocked).toBe(true);
+  await expect(page.getByLabel("Значение")).toHaveValue("снять одежду");
+  await page.getByRole("button", { name: "Сохранить изменения" }).click();
+  await expect(page.locator("#vocabulary-status")).toContainText("Изменения сохранены");
+  const saved = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards[0]);
+  expect(saved.id).toBe(original.id);
+  expect(saved.kind).toBe(original.kind);
+  expect(saved.meanings).toHaveLength(1);
+  expect(saved.schedule).toEqual(original.schedule);
+  expect(saved.reviewHistory).toEqual(original.reviewHistory);
+  expect(saved.nextMeaning).toBe(original.nextMeaning);
+  expect(saved.meanings[0].contexts[0]).toEqual({ form: "took off", text: "She took off her warm coat." });
+  await page.reload();
+  await page.getByLabel("Поиск по основной форме или значению").fill("снять одежду");
+  await expect(page.locator("#vocabulary-cards summary")).toContainText("take off");
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Скачать резервную копию" }).click()
+  ]);
+  const backup = JSON.parse(await fs.readFile(await download.path(), "utf8"));
+  expect(backup.cards[0].meanings[0].text).toBe("снять одежду");
+  expect(backup.cards[0].schedule).toEqual(original.schedule);
+});
+
+test("удаление карточки отменяется без изменений или подтверждается и убирает её из занятия", async ({ page, context }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [
+    { id: "delete-me", kind: "word", headword: "gone", meanings: [{ text: "удалить", contexts: [], examples: [] }] },
+    { id: "keep-me", kind: "word", headword: "stay", meanings: [{ text: "остаться", contexts: [], examples: [] }] }
+  ] }));
+  const study = await context.newPage();
+  await study.goto("/src/review.html");
+  await study.getByRole("button", { name: "Начать занятие" }).click();
+  await expect(study.locator("#review-headword")).toHaveText("gone");
+  const remove = page.locator('[data-card-id="delete-me"]');
+  await remove.locator("summary").click();
+  const canceled = page.waitForEvent("dialog");
+  const canceledClick = remove.getByRole("button", { name: "Удалить карточку" }).click();
+  await (await canceled).dismiss();
+  await canceledClick;
+  await expect(page.locator('[data-card-id="delete-me"]')).toHaveCount(1);
+  await expect.poll(async () => page.evaluate(async () => (await chrome.storage.local.get("cards")).cards.length)).toBe(2);
+  const confirmed = page.waitForEvent("dialog");
+  const confirmedClick = remove.getByRole("button", { name: "Удалить карточку" }).click();
+  await (await confirmed).accept();
+  await confirmedClick;
+  await expect(page.locator('[data-card-id="delete-me"]')).toHaveCount(0);
+  await expect(study.locator("#review-headword")).toHaveText("stay");
+  await expect(study.locator("#review-status")).toContainText("удалена в словаре");
+});
+
+test("изменение другой записи во второй вкладке не сбрасывает активную форму", async ({ page, context }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [
+    { id: "editing", kind: "word", headword: "edit", meanings: [{ text: "old", contexts: [{ form: "edit", text: "Old context." }], examples: [] }] },
+    { id: "other", kind: "word", headword: "other", meanings: [{ text: "unchanged", contexts: [], examples: [] }] }
+  ] }));
+  const editCard = page.locator('[data-card-id="editing"]');
+  await editCard.locator("summary").click();
+  await editCard.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await page.getByLabel("Значение").fill("draft");
+  const other = await context.newPage();
+  await other.goto("/src/vocabulary.html");
+  await other.evaluate(async () => {
+    const { cards } = await chrome.storage.local.get("cards");
+    cards[1].meanings[0].text = "изменено отдельно";
+    await chrome.storage.local.set({ cards });
+  });
+  await expect(page.getByLabel("Значение")).toHaveValue("draft");
+  await expect(page.getByLabel("Значение")).toBeFocused();
+});
+
+test("поиск предупреждает об уходе из изменённой формы и позволяет отменить или продолжить", async ({ page }) => {
+  await page.goto("/src/vocabulary.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: [
+    { id: "guarded", kind: "word", headword: "guarded", meanings: [{ text: "old", contexts: [{ form: "guarded", text: "Old context." }], examples: [] }] },
+    { id: "other", kind: "word", headword: "other", meanings: [{ text: "other meaning", contexts: [], examples: [] }] }
+  ] }));
+  const card = page.locator('[data-card-id="guarded"]');
+  await card.locator("summary").click();
+  await card.getByRole("button", { name: "Изменить значение и контекст" }).click();
+  await page.getByLabel("Значение").fill("draft");
+  const cancelPrompt = page.waitForEvent("dialog");
+  const firstSearch = page.getByLabel("Поиск по основной форме или значению").fill("other");
+  await (await cancelPrompt).dismiss();
+  await firstSearch;
+  await expect(page.getByLabel("Значение")).toHaveValue("draft");
+  await expect(page.getByLabel("Поиск по основной форме или значению")).toHaveValue("");
+  const acceptPrompt = page.waitForEvent("dialog");
+  const secondSearch = page.getByLabel("Поиск по основной форме или значению").fill("other");
+  await (await acceptPrompt).accept();
+  await secondSearch;
+  await expect(page.locator(".vocabulary-editor")).toHaveCount(0);
+  await expect(page.locator("#vocabulary-cards summary")).toContainText("other");
+  await expect.poll(async () => page.evaluate(async () => (await chrome.storage.local.get("cards")).cards[0].meanings[0].text)).toBe("old");
 });

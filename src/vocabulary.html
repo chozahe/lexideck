@@ -21,13 +21,15 @@
         <h2 id="vocabulary-heading">Словарь</h2>
         <label for="vocabulary-search">Поиск по основной форме или значению</label>
         <input id="vocabulary-search" type="search" autocomplete="off" placeholder="Введите слово или значение">
+        <button id="vocabulary-clear-search" type="button">Сбросить поиск</button>
         <nav id="vocabulary-pagination" aria-label="Страницы словаря" hidden>
           <button id="vocabulary-previous" type="button">Назад</button>
           <span id="vocabulary-page-status" aria-live="polite"></span>
           <button id="vocabulary-next" type="button">Вперёд</button>
         </nav>
         <p id="vocabulary-status" role="status" aria-live="polite"></p>
-        <p id="vocabulary-empty">Пока нет сохранённых карточек.</p>
+        <p id="vocabulary-count" aria-live="polite"></p>
+        <p id="vocabulary-empty">Пока нет сохранённых карточек. Сохраните слово после перевода, чтобы добавить первую карточку.</p>
         <p id="vocabulary-no-results" hidden>По этому запросу карточки не найдены.</p>
         <div id="vocabulary-cards" aria-live="polite"></div>
       </section>

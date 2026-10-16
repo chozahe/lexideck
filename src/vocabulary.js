@@ -12,6 +12,8 @@ let query = "";
 let page = 1;
 let expandedIds = new Set();
 const nodes = new Map();
+let editing;
+let lastUrl = location.href;
 
 function readUrlState() {
   const params = new URL(location.href).searchParams;
@@ -29,6 +31,22 @@ function writeUrlState(mode = "push") {
   if (page > 1) url.searchParams.set("page", String(page));
   for (const id of expandedIds) url.searchParams.append("open", id);
   history[mode === "replace" ? "replaceState" : "pushState"]({}, "", url);
+  lastUrl = location.href;
+}
+
+function leaveEditor() {
+  if (!editing) return true;
+  if (editing.dirty && !window.confirm("Отменить несохранённые изменения карточки?")) {
+    nodes.get(editing.cardId)?.content.querySelector('input[name="meaning"]')?.focus();
+    return false;
+  }
+  const cardId = editing.cardId;
+  editing = undefined;
+  window.onbeforeunload = null;
+  const current = nodes.get(cardId);
+  const card = snapshot.find((item) => item.id === cardId);
+  if (current && card) renderDetails(current.content, card);
+  return true;
 }
 
 function cardText(card) {
@@ -50,12 +68,16 @@ function appendList(parent, title, values, format = (value) => value) {
 
 function renderDetails(container, card) {
   const fragment = document.createDocumentFragment();
-  for (const meaning of card.meanings) {
+  card.meanings.forEach((meaning, meaningIndex) => {
     const section = document.createElement("section");
     section.className = "vocabulary-meaning";
     const heading = document.createElement("h3");
     heading.textContent = meaning.text;
-    section.append(heading);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.textContent = "Изменить значение и контекст";
+    edit.addEventListener("click", () => openEditor(card, meaningIndex));
+    section.append(heading, edit);
     appendList(section, "Контексты употребления", meaning.contexts, (context) => `${context.form}: ${context.text}`);
     appendList(section, "Примеры модели", meaning.examples);
     if (!meaning.examples?.length) {
@@ -66,7 +88,12 @@ function renderDetails(container, card) {
       section.append(addExamples);
     }
     fragment.append(section);
-  }
+  });
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "Удалить карточку";
+  remove.addEventListener("click", () => void deleteCard(card.id));
+  fragment.append(remove);
   container.replaceChildren(fragment);
 }
 
@@ -124,6 +151,112 @@ async function generateExamples(card, meaning, button) {
   }
 }
 
+function setDirty(dirty) {
+  if (!editing) return;
+  editing.dirty = dirty;
+  window.onbeforeunload = dirty ? (event) => { event.preventDefault(); event.returnValue = ""; } : null;
+}
+
+function openEditor(card, meaningIndex) {
+  const record = nodes.get(card.id);
+  const meaning = card.meanings[meaningIndex];
+  if (!record || !meaning) return;
+  editing = { cardId: card.id, meaningIndex, dirty: false };
+  const originalText = meaning.text;
+  const contextIndex = meaning.contexts.length ? 0 : -1;
+  const originalContext = meaning.contexts[contextIndex] || { form: card.headword, text: "" };
+  const form = document.createElement("form");
+  form.className = "vocabulary-editor";
+  const meaningLabel = document.createElement("label");
+  meaningLabel.textContent = "Значение";
+  const meaningInput = document.createElement("input");
+  meaningInput.name = "meaning";
+  meaningInput.required = true;
+  meaningInput.value = originalText;
+  meaningLabel.append(meaningInput);
+  const formLabel = document.createElement("label");
+  formLabel.textContent = "Основная форма в контексте";
+  const contextForm = document.createElement("input");
+  contextForm.name = "context-form";
+  contextForm.required = true;
+  contextForm.value = originalContext.form || card.headword;
+  formLabel.append(contextForm);
+  const contextLabel = document.createElement("label");
+  contextLabel.textContent = "Контекст употребления";
+  const contextText = document.createElement("textarea");
+  contextText.name = "context";
+  contextText.required = true;
+  contextText.value = originalContext.text;
+  contextLabel.append(contextText);
+  const status = document.createElement("p");
+  status.setAttribute("role", "status");
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.textContent = "Сохранить изменения";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Отмена";
+  cancel.addEventListener("click", () => {
+    editing = undefined;
+    window.onbeforeunload = null;
+    renderDetails(record.content, snapshot.find((item) => item.id === card.id) || card);
+    record.details.querySelector("summary").focus();
+  });
+  const updateDirty = () => setDirty(
+    meaningInput.value !== originalText ||
+    contextForm.value !== (originalContext.form || "") ||
+    contextText.value !== (originalContext.text || "")
+  );
+  for (const input of [meaningInput, contextForm, contextText]) input.addEventListener("input", updateDirty);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const nextMeaning = meaningInput.value.trim();
+    const nextForm = contextForm.value.trim();
+    const nextContext = contextText.value.trim();
+    if (!nextMeaning || !nextForm || !nextContext) {
+      status.textContent = "Заполните значение, основную форму и контекст.";
+      return;
+    }
+    save.disabled = true;
+    try {
+      await updateCards((cards) => {
+        const target = cards.find((item) => item.id === card.id);
+        const targetMeaning = target?.meanings[meaningIndex];
+        if (!targetMeaning) throw new Error("Карточка или значение удалены в другом окне.");
+        targetMeaning.text = nextMeaning;
+        if (contextIndex < 0) targetMeaning.contexts.push({ form: nextForm, text: nextContext });
+        else {
+          const { start, end, position, ...preserved } = targetMeaning.contexts[contextIndex];
+          targetMeaning.contexts[contextIndex] = { ...preserved, form: nextForm, text: nextContext };
+        }
+      });
+      editing = undefined;
+      window.onbeforeunload = null;
+      const updated = snapshot.find((item) => item.id === card.id) || card;
+      renderDetails(record.content, updated);
+      $("vocabulary-status").textContent = "Изменения сохранены.";
+      record.details.querySelector("summary").focus();
+    } catch (error) {
+      status.textContent = `Не удалось сохранить изменения: ${error.message}`;
+      save.disabled = false;
+    }
+  });
+  form.append(meaningLabel, formLabel, contextLabel, save, cancel, status);
+  record.content.replaceChildren(form);
+  meaningInput.focus();
+}
+
+async function deleteCard(id) {
+  const card = snapshot.find((item) => item.id === id);
+  if (!card || !window.confirm(`Удалить карточку «${card.headword}» и её историю повторений?`)) return;
+  await updateCards((cards) => {
+    const index = cards.findIndex((item) => item.id === id);
+    if (index >= 0) cards.splice(index, 1);
+  });
+  $("vocabulary-status").textContent = `Карточка «${card.headword}» удалена.`;
+  $("vocabulary-search").focus();
+}
+
 function makeNode(card) {
   const details = document.createElement("details");
   details.className = "vocabulary-card";
@@ -143,6 +276,10 @@ function makeNode(card) {
     } else expandedIds.delete(details.dataset.cardId);
   });
   summary.addEventListener("click", () => {
+    if (details.open && editing?.cardId === card.id && !leaveEditor()) {
+      details.open = true;
+      return;
+    }
     if (details.open) expandedIds.delete(card.id);
     else expandedIds.add(card.id);
     writeUrlState("push");
@@ -166,7 +303,7 @@ function updateNode(card, record) {
     record.status.replaceChildren("Следующее повторение: ", due);
   } else record.status.textContent = "Новая карточка";
   record.details.open = expandedIds.has(card.id);
-  if (record.details.open) renderDetails(record.content, card);
+  if (record.details.open && editing?.cardId !== card.id) renderDetails(record.content, card);
 }
 
 function renderVocabulary() {
@@ -200,6 +337,8 @@ function renderVocabulary() {
 
   $("vocabulary-empty").hidden = snapshot.length > 0;
   $("vocabulary-no-results").hidden = snapshot.length === 0 || results.length > 0;
+  $("vocabulary-count").textContent = `Найдено карточек: ${results.length}.`;
+  $("vocabulary-clear-search").hidden = !query;
   $("vocabulary-pagination").hidden = results.length <= PAGE_SIZE;
   $("vocabulary-page-status").textContent = `${page} / ${pageCount} · карточек: ${results.length}`;
   $("vocabulary-previous").disabled = page <= 1;
@@ -239,13 +378,26 @@ async function importBackup(file) {
 }
 
 $("vocabulary-search").addEventListener("input", () => {
+  if (!leaveEditor()) {
+    $("vocabulary-search").value = query;
+    return;
+  }
   query = normalize($("vocabulary-search").value);
   page = 1;
   writeUrlState("replace");
   renderVocabulary();
 });
-$("vocabulary-previous").addEventListener("click", () => { page -= 1; writeUrlState(); renderVocabulary(); });
-$("vocabulary-next").addEventListener("click", () => { page += 1; writeUrlState(); renderVocabulary(); });
+$("vocabulary-clear-search").addEventListener("click", () => {
+  if (!leaveEditor()) return;
+  $("vocabulary-search").value = "";
+  query = "";
+  page = 1;
+  writeUrlState("replace");
+  renderVocabulary();
+  $("vocabulary-search").focus();
+});
+$("vocabulary-previous").addEventListener("click", () => { if (!leaveEditor()) return; page -= 1; writeUrlState(); renderVocabulary(); });
+$("vocabulary-next").addEventListener("click", () => { if (!leaveEditor()) return; page += 1; writeUrlState(); renderVocabulary(); });
 $("export-backup").addEventListener("click", () => {
   void exportBackup().catch((error) => { $("backup-status").textContent = `Не удалось экспортировать словарь: ${error.message}`; });
 });
@@ -265,6 +417,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   const activeId = document.activeElement?.closest?.(".vocabulary-card")?.dataset.cardId;
   const oldCards = new Map(snapshot.map((card) => [card.id, card]));
   snapshot = Array.isArray(changes.cards.newValue) ? changes.cards.newValue : [];
+  if (editing && !snapshot.some((card) => card.id === editing.cardId)) {
+    editing = undefined;
+    window.onbeforeunload = null;
+  }
   index = snapshot.map((card) => ({ card, text: cardText(card) }));
   if (activeId && !snapshot.some((card) => card.id === activeId)) {
     $("vocabulary-status").textContent = "Карточка изменилась в другом окне.";
@@ -277,6 +433,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 readUrlState();
 window.addEventListener("popstate", () => {
+  const nextUrl = location.href;
+  if (!leaveEditor()) {
+    history.pushState({}, "", lastUrl);
+    return;
+  }
+  lastUrl = nextUrl;
   readUrlState();
   renderVocabulary();
 });

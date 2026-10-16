@@ -173,7 +173,20 @@ export function setupReview(onReview = async () => {}) {
   void chrome.storage.local.get("cards").then(({ cards = [] }) => renderQueueSummary(cards));
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && (changes.cards || changes.newCardLimit)) {
-      if (changes.cards) void renderQueueSummary(changes.cards.newValue || []);
+      if (changes.cards) {
+        const cards = changes.cards.newValue || [];
+        void renderQueueSummary(cards);
+        if (sessionStarted && currentCard && !cards.some((card) => card.id === currentCard.id) && !saving) {
+          const deleted = currentCard.headword;
+          sessionQueue.splice(sessionCompleted, 1);
+          currentCard = undefined;
+          void nextCard().then(() => {
+            $("review-status").textContent = `Карточка «${deleted}» удалена в словаре. ${$("review-status").textContent}`;
+            if (currentCard) $("show-answer").focus();
+            else $("review-status").focus();
+          });
+        }
+      }
       else void chrome.storage.local.get("cards").then(({ cards = [] }) => renderQueueSummary(cards));
     }
   });
