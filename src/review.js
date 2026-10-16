@@ -19,6 +19,52 @@ async function dailyLimit() {
   return newCardLimit;
 }
 
+async function queueFor(cards, now = new Date()) {
+  const due = cards.filter((card) => isDue(card, now));
+  const future = cards.filter((card) => card.schedule && !isDue(card, now))
+    .sort((a, b) => new Date(a.schedule.due) - new Date(b.schedule.due));
+  const unreviewed = cards.filter((card) => !card.schedule);
+  const remainingNew = Math.max(0, await dailyLimit() - introducedOn(cards, now));
+  return { due, future, unreviewed, newCards: unreviewed.slice(0, remainingNew) };
+}
+
+async function renderQueueSummary(cards) {
+  const { due, future, unreviewed, newCards } = await queueFor(cards);
+  $("due-count").textContent = new Intl.NumberFormat("ru-RU").format(due.length);
+  $("new-count").textContent = new Intl.NumberFormat("ru-RU").format(newCards.length);
+  const reasons = [];
+  const addReason = (content) => {
+    const item = document.createElement("li");
+    if (typeof content === "string") item.textContent = content;
+    else item.append(content);
+    reasons.push(item);
+  };
+  if (!cards.length) {
+    const message = document.createElement("span");
+    message.append("Словарь пуст. ");
+    const link = document.createElement("a");
+    link.href = "vocabulary.html";
+    link.textContent = "Сохраните первое слово";
+    message.append(link, ", чтобы начать занятие.");
+    addReason(message);
+  } else {
+    if (future.length) {
+      const nearest = new Date(future[0].schedule.due);
+      const when = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(nearest);
+      addReason(`Следующее повторение назначено на ${when}.`);
+    }
+    if (!unreviewed.length) addReason("Новых карточек пока нет.");
+    else if (!newCards.length) addReason("Дневной лимит новых карточек исчерпан.");
+  }
+  const settings = document.createElement("a");
+  settings.href = "settings.html";
+  settings.textContent = "Изменить дневной лимит новых карточек в настройках";
+  const settingsItem = document.createElement("li");
+  settingsItem.append(settings);
+  reasons.push(settingsItem);
+  $("queue-reasons").replaceChildren(...reasons);
+}
+
 function introducedOn(cards, now) {
   return cards.filter((card) => card.firstReviewedAt && localDay(new Date(card.firstReviewedAt)) === localDay(now)).length;
 }
@@ -44,7 +90,15 @@ function renderProgress() {
   bar.value = sessionCompleted;
 }
 
+function renderSessionActions() {
+  const inProgress = sessionStarted && Boolean(currentCard);
+  $("start-review").hidden = inProgress;
+  $("exit-review").hidden = !inProgress;
+  $("review-queue-summary").hidden = inProgress;
+}
+
 async function startSession() {
+  $("study-achievement-details").open = false;
   sessionQueue = [];
   sessionCompleted = 0;
   sessionStarted = true;
@@ -60,11 +114,8 @@ async function nextCard() {
   }
   const { cards = [] } = await chrome.storage.local.get("cards");
   const now = new Date();
-  const remainingNew = Math.max(0, await dailyLimit() - introducedOn(cards, now));
-  const available = [
-    ...cards.filter((card) => isDue(card, now)),
-    ...cards.filter((card) => !card.schedule).slice(0, remainingNew)
-  ];
+  const { due, newCards } = await queueFor(cards, now);
+  const available = [...due, ...newCards];
   // Пересчитываем остаток по FSRS: срок уже оценённой карточки мог наступить снова.
   sessionQueue.splice(sessionCompleted, sessionQueue.length - sessionCompleted, ...available.map((card) => card.id));
   currentCard = available[0];
@@ -82,6 +133,7 @@ async function nextCard() {
   }
   renderProgress();
   if (currentCard) $("review-headword").textContent = currentCard.headword;
+  renderSessionActions();
 }
 
 function showAnswer() {
@@ -98,18 +150,66 @@ function showAnswer() {
       return item;
     }));
   }
+  const exampleDetails = $("review-example-details");
+  exampleDetails.open = false;
+  exampleDetails.hidden = !meaning.examples.length;
+  const now = new Date();
+  const previewCard = currentCard.schedule || createEmptyCard(now);
+  const preview = scheduler.repeat(previewCard, now);
+  const dueFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
+  for (const button of $("review-ratings").querySelectorAll("button")) {
+    const due = preview[Number(button.dataset.rating)].card.due;
+    button.querySelector(".rating-due").textContent = dueFormatter.format(new Date(due));
+    button.setAttribute("aria-description", `Следующее повторение: ${dueFormatter.format(new Date(due))}`);
+  }
   $("review-answer").hidden = false;
   $("show-answer").hidden = true;
+  $("review-status").textContent = "Ответ открыт. Оцените, насколько хорошо вы вспомнили значение.";
+  $("review-answer").focus();
 }
 
 export function setupReview(onReview = async () => {}) {
   if (!$("review")) return;
   void renderStudyStats();
+  void chrome.storage.local.get("cards").then(({ cards = [] }) => renderQueueSummary(cards));
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && (changes.cards || changes.newCardLimit)) {
+      if (changes.cards) {
+        const cards = changes.cards.newValue || [];
+        void renderQueueSummary(cards);
+        if (sessionStarted && currentCard && !cards.some((card) => card.id === currentCard.id) && !saving) {
+          const deleted = currentCard.headword;
+          sessionQueue.splice(sessionCompleted, 1);
+          currentCard = undefined;
+          void nextCard().then(() => {
+            $("review-status").textContent = `Карточка «${deleted}» удалена в словаре. ${$("review-status").textContent}`;
+            if (currentCard) $("show-answer").focus();
+            else $("review-status").focus();
+          });
+        }
+      }
+      else void chrome.storage.local.get("cards").then(({ cards = [] }) => renderQueueSummary(cards));
+    }
+  });
   $("start-review").addEventListener("click", () => {
     $("start-review").disabled = true;
-    void startSession().catch((error) => { $("review-status").textContent = error.message; }).finally(() => {
+    void startSession().then(() => {
+      if (currentCard) $("show-answer").focus();
+      else $("review-status").focus();
+    }).catch((error) => { $("review-status").textContent = error.message; $("review-status").focus(); }).finally(() => {
       $("start-review").disabled = saving;
     });
+  });
+  $("exit-review").addEventListener("click", () => {
+    sessionQueue = [];
+    sessionCompleted = 0;
+    sessionStarted = false;
+    currentCard = undefined;
+    $("review-card").hidden = true;
+    $("review-status").textContent = "Вы вышли из занятия. Сохранённые оценки остаются в истории.";
+    renderProgress();
+    renderSessionActions();
+    $("start-review").focus();
   });
   $("show-answer").addEventListener("click", showAnswer);
   for (const button of $("review-ratings").querySelectorAll("button")) {
@@ -145,13 +245,18 @@ export function setupReview(onReview = async () => {}) {
         await renderStudyStats();
         await onReview();
         await nextCard();
+        if (currentCard) $("show-answer").focus();
+        else $("review-status").focus();
       } catch (error) {
         if (queueChanged) {
           sessionQueue.splice(sessionCompleted, 1);
           currentCard = undefined;
           await nextCard();
           $("review-status").textContent = `${error.message} ${$("review-status").textContent}`;
+          if (currentCard) $("show-answer").focus();
+          else $("review-status").focus();
         } else $("review-status").textContent = `Не удалось сохранить ответ: ${error.message}`;
+        if (!queueChanged) button.focus();
       } finally {
         saving = false;
         $("start-review").disabled = false;

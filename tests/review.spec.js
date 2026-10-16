@@ -16,6 +16,88 @@ test("панель открывает отдельную вкладку сраз
   await expect(reviewTab.getByRole("button", { name: "Начать занятие" })).toBeVisible();
 });
 
+test("клавиатурный цикл сохраняет фокус на ответе, следующей карточке и итоге", async ({ page }) => {
+  await page.goto("/src/review.html");
+  await page.evaluate(async () => chrome.storage.local.set({ cards: ["one", "two"].map((headword) => ({
+    id: headword, kind: "word", headword,
+        meanings: [{ text: `значение ${headword}`, contexts: [{ form: headword, text: `Контекст ${headword}.` }], examples: [`Пример ${headword}.`] }]
+  })) }));
+  await page.reload();
+  const show = page.getByRole("button", { name: "Показать ответ" });
+  await page.getByRole("button", { name: "Начать занятие" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(show).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#review-answer")).toBeFocused();
+  await expect(page.locator("#review-status")).toHaveText("Ответ открыт. Оцените, насколько хорошо вы вспомнили значение.");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Не вспомнил", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await expect(show).toBeFocused();
+  await expect(page.locator("#review-headword")).toHaveText("two");
+  await expect(page.locator("#review-answer")).toBeHidden();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#review-answer")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#review-status")).toBeFocused();
+  await expect(page.locator("#review-status")).toHaveText("Занятие завершено: все карточки пройдены.");
+});
+
+test("preview FSRS не записывает данные и совпадает с сохранённой оценкой в обеих темах", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.clock.install({ time: new Date("2026-10-09T12:00:00Z") });
+  for (const theme of ["latte", "macchiato"]) {
+    await page.goto("/src/review.html");
+    await page.evaluate(async (selectedTheme) => {
+      await chrome.storage.local.set({ theme: selectedTheme, cards: [{
+        id: "preview", kind: "word", headword: "preview",
+        meanings: [{ text: "значение", contexts: [{ form: "preview", text: "Контекст." }], examples: ["Пример 1.", "Пример 2."] }]
+      }] });
+    }, theme);
+    await page.reload();
+    await page.getByRole("button", { name: "Начать занятие" }).click();
+    await page.getByRole("button", { name: "Показать ответ" }).click();
+    await expect(page.locator("#review-example-details")).toBeVisible();
+    await expect(page.locator("#review-example-details")).not.toHaveAttribute("open", "");
+    await expect(page.locator("#review-examples li")).toHaveCount(2);
+    const previews = await page.locator("#review-ratings .rating-due").allTextContents();
+    expect(previews).toHaveLength(4);
+    expect(previews.every(Boolean)).toBe(true);
+    const before = await page.evaluate(async () => (await chrome.storage.local.get(["cards", "studyStats"])));
+    expect(before.cards[0].schedule).toBeUndefined();
+    expect(before.cards[0].reviewHistory).toBeUndefined();
+    for (const rating of ["Не вспомнил", "Трудно", "Хорошо", "Легко"]) {
+      await expect(page.getByRole("button", { name: rating, exact: true })).toBeInViewport();
+    }
+    await page.getByRole("button", { name: "Хорошо", exact: true }).click();
+    await expect(page.locator("#review-progress")).toHaveText("Пройдено 1 из 1. Осталось 0.");
+    const after = await page.evaluate(async () => (await chrome.storage.local.get(["cards", "studyStats"])));
+    const actualPreview = await page.evaluate((due) => new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(due)), after.cards[0].schedule.due);
+    expect(actualPreview).toBe(previews[2]);
+    expect(after.cards[0].reviewHistory).toHaveLength(1);
+    expect(after.studyStats.reviewCount).toBe((before.studyStats?.reviewCount || 0) + 1);
+    await page.evaluate(async () => {
+      const { cards } = await chrome.storage.local.get("cards");
+      cards.push({ id: "unrated", kind: "word", headword: "unrated", meanings: [{ text: "значение", contexts: [], examples: [] }] });
+      await chrome.storage.local.set({ cards });
+    });
+    await page.getByRole("button", { name: "Начать занятие" }).click();
+    await page.getByRole("button", { name: "Показать ответ" }).click();
+    await page.getByRole("button", { name: "Выйти из занятия" }).click();
+    const exited = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards);
+    expect(exited[0].reviewHistory).toHaveLength(1);
+    expect(exited[0].schedule.due).toBe(after.cards[0].schedule.due);
+    expect(exited[1].reviewHistory).toBeUndefined();
+    expect(exited[1].schedule).toBeUndefined();
+    await expect(page.locator("#review-status")).toContainText("Сохранённые оценки остаются в истории");
+  }
+});
+
 test("оценка карточки обновляет серию и достижения, а пропуск дня сбрасывает серию", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-10-09T12:00:00") });
   await page.goto("/src/review.html");
@@ -33,7 +115,9 @@ test("оценка карточки обновляет серию и дости�
   await expect(page.locator("#study-streak")).toHaveText("Серия занятий: 2 дня");
   await expect(page.locator("#study-achievements")).toContainText("Пока не получено: Первый ответ");
   await expect(page.locator("#study-achievements")).toContainText("Пока не получено: Серия из 3 дней");
+  await page.locator("#study-achievement-details").evaluate((details) => { details.open = true; });
   await page.getByRole("button", { name: "Начать занятие" }).click();
+  await expect(page.locator("#study-achievement-details")).not.toHaveAttribute("open", "");
   await review.getByRole("button", { name: "Показать ответ" }).click();
   await review.getByRole("button", { name: "Хорошо", exact: true }).click();
   await expect(page.locator("#study-streak")).toHaveText("Серия занятий: 3 дня");
@@ -50,6 +134,26 @@ test("оценка карточки обновляет серию и дости�
   }));
   expect(cards[0].reviewHistory).toHaveLength(1);
   expect(studyStats.reviewCount).toBe(1);
+});
+
+test("счётчик серии использует русские формы для нуля, границ и чисел больше ста", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-10-09T12:00:00") });
+  await page.goto("/src/review.html");
+  const expected = new Map([[0, "0 дней"], [1, "1 день"], [2, "2 дня"], [4, "4 дня"], [5, "5 дней"],
+    [11, "11 дней"], [12, "12 дней"], [14, "14 дней"], [21, "21 день"], [22, "22 дня"], [25, "25 дней"], [101, "101 день"], [111, "111 дней"]]);
+  for (const [count, phrase] of expected) {
+    await page.evaluate(async (length) => {
+      const days = [];
+      const date = new Date();
+      for (let index = 0; index < length; index++) {
+        days.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+        date.setDate(date.getDate() - 1);
+      }
+      await chrome.storage.local.set({ studyStats: { days, reviewCount: 0 } });
+    }, count);
+    await page.reload();
+    await expect(page.locator("#study-streak")).toHaveText(`Серия занятий: ${phrase}`);
+  }
 });
 
 test("дневной лимит новых карточек равен 10, меняется и сохраняется между занятиями", async ({ page }) => {
@@ -97,7 +201,7 @@ test("дневной лимит новых карточек равен 10, ме�
 
 async function saveTranslatedWords(page) {
   await page.goto("/src/settings.html");
-  await page.locator("#api-url").fill("http://127.0.0.1:4173/v1");
+  await page.locator("#api-url").fill(new URL("/v1", page.url()).origin + "/v1");
   await page.locator("#model").fill("controlled-model");
   await page.locator("#api-key").fill("test-secret");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
@@ -107,8 +211,8 @@ async function saveTranslatedWords(page) {
   await page.locator("#translate").click();
   await expect(page.locator("#word-meanings li")).toHaveCount(3);
   for (const row of await page.locator("#word-meanings li").all()) {
-    await row.getByRole("button", { name: "Сохранить", exact: true }).click();
-    await expect(row.getByRole("button", { name: "Сохранено", exact: true })).toBeVisible();
+    await row.getByRole("button", { name: /^(Сохранить|Добавить значение|Добавить контекст):/ }).click();
+    await expect(row.getByRole("status")).toContainText("Сохранено в словарь:");
   }
   await page.goto("/src/vocabulary.html");
   await expect(page.locator("#vocabulary-cards summary")).toContainText(["take off", "coat"]);
@@ -117,9 +221,15 @@ async function saveTranslatedWords(page) {
 }
 
 async function readCardDue(page, headword) {
+  await expect.poll(() => page.evaluate(async (word) => {
+    const { cards = [] } = await chrome.storage.local.get("cards");
+    return cards.find((card) => card.headword === word)?.schedule?.due || null;
+  }, headword)).not.toBeNull();
   await page.goto("/src/vocabulary.html");
   const card = page.locator("#vocabulary-cards details").filter({ has: page.locator("summary strong", { hasText: headword }) });
   await expect(card.locator("summary")).toBeVisible();
+  await card.locator("summary").click();
+  await expect(card.locator("time")).toBeVisible();
   const due = await card.locator("time").getAttribute("datetime");
   await page.goto("/src/review.html");
   return due;
@@ -137,8 +247,8 @@ test("значения карточки чередуются с общим ра�
   await expect(page.locator("#review-meaning")).toHaveText("пальто, которое она сняла");
   await expect(review).not.toContainText("пальто, которое она надела");
   await review.getByRole("button", { name: "Не вспомнил", exact: true }).click();
-  const due = await readCardDue(page, "coat");
   await expect(page.locator("#review-card")).toBeHidden();
+  const due = await readCardDue(page, "coat");
   await page.goto("/src/settings.html");
   await page.getByLabel("Новых карточек в день").fill("0");
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
@@ -151,8 +261,12 @@ test("значения карточки чередуются с общим ра�
   await expect(page.locator("#review-meaning")).toHaveText("пальто, которое она надела");
   await expect(review).not.toContainText("пальто, которое она сняла");
   await review.getByRole("button", { name: "Трудно", exact: true }).click();
+  await expect(page.locator("#review-card")).toBeHidden();
   const updatedDue = await readCardDue(page, "coat");
-  expect(updatedDue).not.toBe(due);
+  const afterHard = await page.evaluate(async () => (await chrome.storage.local.get("cards")).cards.find((card) => card.headword === "coat"));
+  expect(new Date(updatedDue).getTime()).toBeGreaterThan(0);
+  expect(afterHard.reviewHistory).toHaveLength(2);
+  expect(afterHard.reviewHistory.at(-1).rating).toBe(2);
 });
 
 test("карточка из словаря получает срок FSRS после показа ответа и оценки", async ({ page }) => {
@@ -174,6 +288,7 @@ test("карточка из словаря получает срок FSRS пос
   expect(await readCardDue(page, "take off")).toBe(due);
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(review.getByRole("heading", { name: "coat", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Выйти из занятия" }).click();
   await page.clock.setSystemTime(new Date(due));
   await page.getByRole("button", { name: "Начать занятие" }).click();
   await expect(review.getByRole("heading", { name: "take off", exact: true })).toBeVisible();
@@ -191,6 +306,7 @@ test("оценка устаревшей карточки во второй вк�
   const due = await readCardDue(page, "take off");
   await other.getByRole("button", { name: "Не вспомнил", exact: true }).click();
   await expect(other.locator("#review-status")).toContainText("Карточка уже изменилась");
+  await expect(other.getByRole("button", { name: "Показать ответ" })).toBeFocused();
   await page.reload();
   expect(await readCardDue(page, "take off")).toBe(due);
 });

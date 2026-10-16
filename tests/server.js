@@ -35,7 +35,7 @@ const server = http.createServer((request, response) => {
               const keys = Array.isArray(key) ? key : [key];
               return structuredClone(Object.fromEntries(keys.map((item) => [item, values[item]])));
             },
-            set: async (next) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"), structuredClone(next)); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
+            set: async (next) => { if (localStorage.getItem("lexideck-test-storage-fail-set") === "true") throw new Error("quota exceeded"); if (localStorage.getItem("lexideck-test-storage-hold-set") === "true") await new Promise((resolve) => { window.__releaseStorageSet = resolve; }); Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}"), structuredClone(next)); localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); listeners.forEach((listener) => listener(Object.fromEntries(Object.entries(next).map(([key, newValue]) => [key, { newValue } ])), "local")); },
             remove: async (key) => { Object.assign(values, JSON.parse(localStorage.getItem("lexideck-test-storage") || "{}")); delete values[key]; localStorage.setItem("lexideck-test-storage", JSON.stringify(values)); }
           },
           session: {
@@ -88,7 +88,7 @@ const server = http.createServer((request, response) => {
     let raw = "";
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
-      lastRequest = { headers: request.headers, body: JSON.parse(raw) };
+      lastRequest = { url: request.url, headers: request.headers, body: JSON.parse(raw) };
       apiRequests.push(lastRequest);
       const isVision = Array.isArray(lastRequest.body.messages?.[1]?.content);
       const isExpressionExamples = lastRequest.body.messages?.[0]?.content.includes("Сгенерируй два дополнительных примера");
@@ -102,7 +102,8 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  const requested = request.url === "/" ? "/src/panel.html" : request.url;
+  const requestPath = new URL(request.url, "http://127.0.0.1").pathname;
+  const requested = requestPath === "/" ? "/src/panel.html" : requestPath;
   const filePath = path.resolve(root, `.${decodeURIComponent(requested)}`);
   if (!filePath.startsWith(`${root}${path.sep}`)) {
     response.writeHead(403).end();

@@ -20,23 +20,47 @@
       <section aria-labelledby="settings-heading">
         <h2 id="settings-heading">Настройки</h2>
         <form id="settings-form">
-          <label for="source-language">Исходный язык</label>
-          <input id="source-language" name="sourceLanguage" value="English" autocomplete="off" required>
-          <label for="target-language">Язык перевода</label>
-          <input id="target-language" name="targetLanguage" value="Русский" autocomplete="off" required>
-          <label for="api-url">URL API</label>
-          <input id="api-url" name="apiUrl" type="url" placeholder="https://api.example.com/v1" autocomplete="url">
-          <label for="model">Идентификатор модели</label>
-          <input id="model" name="model" autocomplete="off" placeholder="gpt-4o-mini">
-          <label for="api-key">Ключ API</label>
-          <input id="api-key" name="apiKey" type="password" autocomplete="off">
-          <label for="new-card-limit">Новых карточек в день</label>
-          <input id="new-card-limit" name="newCardLimit" type="number" min="0" step="1" value="10" required>
+          <fieldset aria-describedby="translation-help">
+            <legend>Перевод</legend>
+            <p id="translation-help">Выберите язык исходного текста и язык, на который переводить.</p>
+            <label for="source-language">Исходный язык</label>
+            <input id="source-language" name="sourceLanguage" value="English" autocomplete="off" required>
+            <label for="target-language">Язык перевода</label>
+            <input id="target-language" name="targetLanguage" value="Русский" autocomplete="off" required>
+          </fieldset>
+          <fieldset aria-describedby="api-help api-readiness">
+            <legend>Подключение API</legend>
+            <p id="api-help">Укажите базовый адрес, например https://api.example.com/v1, либо полный адрес, заканчивающийся на /chat/completions. Модель должна поддерживать OpenAI-compatible Chat Completions; для комиксов нужна поддержка изображений. Ключ хранится только в локальном хранилище этого профиля браузера и не входит в резервную копию. При переводе внешний сервис получает введённый текст, а при анализе комикса — только выбранную область изображения.</p>
+            <p id="api-readiness" role="status" aria-live="polite"></p>
+            <label for="api-url">URL API</label>
+            <input id="api-url" name="apiUrl" type="url" placeholder="https://api.example.com/v1" autocomplete="url" aria-describedby="api-url-help api-url-error">
+            <small id="api-url-help">Допустим http:// или https://; можно указать базовый URL или полный endpoint.</small>
+            <small id="api-url-error" class="field-error"></small>
+            <label for="model">Идентификатор модели</label>
+            <input id="model" name="model" autocomplete="off" placeholder="gpt-4o-mini" aria-describedby="model-help model-error">
+            <small id="model-help">Укажите точный идентификатор модели из панели выбранного сервиса.</small>
+            <small id="model-error" class="field-error"></small>
+            <label for="api-key">Ключ API</label>
+            <input id="api-key" name="apiKey" type="password" autocomplete="off" aria-describedby="api-key-help api-key-error">
+            <small id="api-key-help">Ключ передаётся выбранному API при запросе и хранится локально в этом профиле.</small>
+            <small id="api-key-error" class="field-error"></small>
+            <button id="test-api" type="button">Проверить подключение</button>
+            <p id="api-test-status" role="status" aria-live="polite"></p>
+            <details id="api-test-details" hidden><summary>Технические подробности</summary><pre id="api-test-detail"></pre></details>
+            <p id="api-next-step">Чтобы начать перевод, заполните URL API, модель и ключ, затем проверьте подключение и сохраните настройки.</p>
+          </fieldset>
+          <fieldset aria-describedby="review-help">
+            <legend>Повторение</legend>
+            <p id="review-help">Лимит новых карточек хранится локально. Значение 0 отключает новые карточки, но карточки, которым пора на повторение, останутся доступны.</p>
+            <label for="new-card-limit">Новых карточек в день</label>
+            <input id="new-card-limit" name="newCardLimit" type="number" min="0" step="1" value="10" required aria-describedby="review-help">
+          </fieldset>
           <button type="submit">Сохранить настройки</button>
         </form>
         <p id="settings-status" role="status" aria-live="polite"></p>
-        <fieldset aria-labelledby="theme-heading">
+        <fieldset aria-labelledby="theme-heading" aria-describedby="theme-help">
           <legend id="theme-heading">Оформление</legend>
+          <p id="theme-help">Тема сохраняется сразу после выбора, отдельно от кнопки сохранения настроек.</p>
           <label for="theme-preference">Тема</label>
           <select id="theme-preference">
             <option value="system">Системная</option>

@@ -3,11 +3,11 @@
   color-scheme: light dark;
   font: 16px/1.55 system-ui, sans-serif;
   --rosewater: light-dark(#dc8a78, #f4dbd6);
-  --red: light-dark(#d20f39, #ed8796);
-  --green: light-dark(#40a02b, #a6da95);
-  --blue: light-dark(#1e66f5, #8aadf4);
-  --text: light-dark(#4c4f69, #cad3f5);
-  --subtext: light-dark(#6c6f85, #a5adcb);
+  --red: light-dark(#b00020, #ed8796);
+  --green: light-dark(#267017, #a6da95);
+  --blue: light-dark(#1554c0, #8aadf4);
+  --text: light-dark(#43465f, #cad3f5);
+  --subtext: light-dark(#5f6278, #a5adcb);
   --overlay: light-dark(#7c7f93, #8087a2);
   --surface2: light-dark(#acb0be, #5b6078);
   --surface1: light-dark(#bcc0cc, #494d64);
@@ -16,7 +16,7 @@
   --mantle: light-dark(#e6e9ef, #1e2030);
   --crust: light-dark(#dce0e8, #181926);
   --accent: var(--blue);
-  --accent-hover: light-dark(#7287fd, #b7bdf8);
+  --accent-hover: light-dark(#3451c5, #b7bdf8);
   --accent-text: var(--base);
   --focus: light-dark(#8839ef, #c6a0f6);
   --border: var(--surface1);
@@ -30,8 +30,9 @@ body {
   padding: clamp(12px, 3vw, 24px);
   color: var(--text);
   background: var(--base);
+  overflow-wrap: anywhere;
 }
-main { width: 100%; max-width: 880px; margin: 0 auto; }
+main { width: 100%; max-width: 880px; min-width: 0; margin: 0 auto; }
 header {
   display: flex;
   align-items: center;
@@ -74,6 +75,9 @@ button {
   border: 1px solid var(--border);
   border-radius: 10px;
   cursor: pointer;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transition: background-color 120ms ease, transform 120ms ease;
 }
 button:hover:not(:disabled) { background: var(--surface1); }
@@ -84,6 +88,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
   outline-offset: 3px;
 }
 section > button { width: 100%; margin-top: 8px; }
+section, fieldset, article, form { min-width: 0; max-width: 100%; }
 #translate, #start-review, #show-answer, #settings-form button[type="submit"], #export-backup {
   color: var(--accent-text);
   background: var(--accent);
@@ -92,29 +97,59 @@ section > button { width: 100%; margin-top: 8px; }
 #translate:hover:not(:disabled), #start-review:hover:not(:disabled), #show-answer:hover:not(:disabled), #settings-form button[type="submit"]:hover:not(:disabled), #export-backup:hover:not(:disabled) {
   background: var(--accent-hover);
 }
-.subtle { color: var(--subtext); background: transparent; text-decoration: underline; border-color: transparent; }
+.subtle { color: var(--text); background: transparent; text-decoration: underline; border-color: transparent; }
 #error, [role="alert"] { color: var(--red); white-space: pre-wrap; }
-#settings-status, #theme-status { color: var(--green); }
+#settings-status[data-state="success"], #theme-status[data-state="success"] { color: var(--green); }
+#settings-status[data-state="error"], #theme-status[data-state="error"] { color: var(--red); }
+#api-test-status { color: var(--subtext); }
+#api-test-status[data-state="success"] { color: var(--green); }
+#api-test-status[data-state="error"] { color: var(--red); }
+.field-error { display: block; color: var(--red); overflow-wrap: anywhere; }
 #backup-status, #vocabulary-status, #review-status, #comic-status { color: var(--subtext); }
+#error, #error-detail, .field-error, #api-help, #api-next-step, #translation-help,
+#review-help, #queue-reasons, .card-context, .vocabulary-meaning, #review-answer,
+#sentence-translation, #word-meanings, #review-progress, [role="status"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 #word-meanings { padding-left: 24px; }
-#word-meanings li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; }
+#word-meanings li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 6px 0; }
+#word-meanings li > * { min-width: 0; overflow-wrap: anywhere; }
 #word-meanings button { flex: none; padding: 6px 10px; }
-#vocabulary-cards h3 { margin: 0 0 6px; font-size: 1rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+#vocabulary-cards h3 { min-width: 0; margin: 0 0 6px; font-size: 1rem; overflow-wrap: anywhere; }
 #vocabulary-cards ul { margin: 4px 0; padding-left: 20px; }
 .vocabulary-card { display: block; padding: 13px 2px; border-top: 1px solid var(--border); }
-.vocabulary-card summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; cursor: pointer; }
-.vocabulary-meaning { margin-top: 10px; padding: 4px 0 4px 16px; border-left: 2px solid var(--border); }
+.vocabulary-card summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; cursor: pointer; list-style: none; overflow-wrap: anywhere; }
+.vocabulary-card summary::-webkit-details-marker { display: none; }
+.vocabulary-card summary::before { content: ""; display: inline-block; width: .55em; height: .55em; flex: 0 0 .55em; border-right: 2px solid var(--subtext); border-bottom: 2px solid var(--subtext); transform: rotate(-45deg); margin: .15em .25em 0 .1em; }
+.vocabulary-card[open] summary::before { transform: rotate(45deg); }
+#vocabulary-pagination { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+#vocabulary-pagination[hidden] { display: none; }
+.vocabulary-editor { display: grid; gap: 8px; margin: 12px 0; }
+.vocabulary-editor label { display: grid; gap: 4px; }
+.vocabulary-meaning { min-width: 0; margin-top: 10px; padding: 4px 0 4px 16px; border-left: 2px solid var(--border); }
 .vocabulary-meaning h3 { font-size: 1rem; margin: 8px 0; }
 input[type="search"] { margin-top: 4px; }
 .card-context { color: var(--subtext); }
 #review-card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 12px; background: var(--base); }
 #review-headword { font-size: 1.65rem; margin: 0 0 16px; overflow-wrap: anywhere; }
 #review-ratings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
-#review-settings { display: flex; align-items: end; gap: 8px; }
+#review-ratings button { display: grid; justify-items: start; gap: 2px; min-width: 0; }
+.rating-due { color: var(--text); font-size: .82em; font-weight: 400; }
+#review-example-details { margin-top: 10px; }
+#review-example-details summary { cursor: pointer; }
+#exit-review { width: auto; }
+#review-queue-summary { margin: 12px 0; padding: 0; border: 0; box-shadow: none; background: transparent; }
+#review-queue-summary h3 { margin: 0 0 8px; }
+#review-queue-summary p { margin: 4px 0; }
+#review-queue-summary ul { padding-left: 20px; }
+#review-settings { display: flex; align-items: end; gap: 8px; min-width: 0; }
 #review-settings label { flex: 1; margin-bottom: 0; }
 #review-settings button { flex: 1; }
 #review-answer h4 { margin-bottom: 4px; }
 #review-answer ul { margin-top: 4px; padding-left: 20px; }
+pre, code, .rating-due { overflow-wrap: anywhere; white-space: pre-wrap; }
 [aria-current="page"] { color: var(--text); font-weight: 700; text-decoration-thickness: 2px; }
 @media (max-width: 520px) {
   header { display: block; }

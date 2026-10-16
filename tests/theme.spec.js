@@ -75,10 +75,10 @@ test("основные действия разделов доступны с к�
     }]
   }));
   await page.goto("/src/review.html");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
+  for (let index = 0; index < 10; index++) {
+    await page.keyboard.press("Tab");
+    if (await page.evaluate(() => document.activeElement.id === "start-review")) break;
+  }
   await expect(page.getByRole("button", { name: "Начать занятие" })).toBeFocused();
   await page.keyboard.press("Enter");
   const answer = page.getByRole("button", { name: "Показать ответ" });
@@ -104,13 +104,13 @@ test("основные действия разделов доступны с к�
 
 test("системная палитра видна до JavaScript без вспышки противоположной темы", async ({ browser }) => {
   for (const [colorScheme, background, text] of [
-    ["light", "rgb(239, 241, 245)", "rgb(76, 79, 105)"],
+    ["light", "rgb(239, 241, 245)", "rgb(67, 70, 95)"],
     ["dark", "rgb(36, 39, 58)", "rgb(202, 211, 245)"]
   ]) {
     const context = await browser.newContext({ javaScriptEnabled: false, colorScheme });
     try {
       const page = await context.newPage();
-      await page.goto("http://127.0.0.1:4173/src/panel.html");
+      await page.goto("/src/panel.html");
       await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.+/);
       await expect(page.locator("body")).toHaveCSS("background-color", background);
       await expect(page.locator("body")).toHaveCSS("color", text);
@@ -118,4 +118,13 @@ test("системная палитра видна до JavaScript без всп
       await context.close();
     }
   }
+});
+
+test("ошибка сохранения темы видна как ошибка с контрастным текстом", async ({ page }) => {
+  await page.goto("/src/settings.html");
+  await page.evaluate(() => localStorage.setItem("lexideck-test-storage-fail-set", "true"));
+  await page.locator("#theme-preference").selectOption("macchiato");
+  await expect(page.locator("#theme-status")).toContainText("Не удалось сохранить тему");
+  await expect(page.locator("#theme-status")).toHaveAttribute("data-state", "error");
+  await expect(page.locator("#theme-status")).toHaveCSS("color", "rgb(176, 0, 32)");
 });

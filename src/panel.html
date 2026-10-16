@@ -21,21 +21,30 @@
       <section>
         <label for="source-text">Текст для перевода</label>
         <textarea id="source-text" rows="5" placeholder="Выделите текст на странице или введите его здесь"></textarea>
+        <p id="api-next-step" role="status" aria-live="polite">Чтобы переводить, укажите URL API, модель и ключ в <a href="settings.html" target="_blank" rel="noopener">Настройках</a>. Ключ хранится только в этом профиле браузера; повторение и дневной лимит работают локально.</p>
         <button id="save-expression" type="button" disabled>Сохранить выделенное выражение</button>
         <form id="expression-form" hidden>
           <p>Выражение: <strong id="expression-text"></strong></p>
           <label for="expression-meaning">Значение</label>
           <input id="expression-meaning" required>
           <button type="submit">Сохранить выражение</button>
+          <button id="save-expression-offline" type="button">Сохранить без примеров</button>
+          <button id="cancel-expression-save" class="subtle" type="button" hidden>Отменить запрос примеров</button>
           <button id="cancel-expression" class="subtle" type="button">Отмена</button>
         </form>
-        <p id="comic-status" role="status"></p>
+        <p id="comic-status" role="status" aria-live="polite"></p>
         <button id="translate" type="button">Перевести</button>
+        <button id="confirm-comic" type="button" hidden>Подтвердить текст и перевести</button>
+        <button id="retry-comic" class="subtle" type="button" hidden>Выбрать область заново</button>
+        <button id="cancel-translation" class="subtle" type="button" hidden>Отменить перевод</button>
+        <p id="translation-status" role="status" aria-live="polite"></p>
         <p id="error" role="alert"></p>
+        <details id="error-details" hidden><summary>Технические подробности</summary><pre id="error-detail"></pre></details>
       </section>
 
       <section id="result" aria-live="polite" hidden>
         <h2>Перевод</h2>
+        <p id="result-source"></p>
         <p id="sentence-translation"></p>
         <h2>Слова по порядку</h2>
         <ol id="word-meanings"></ol>
